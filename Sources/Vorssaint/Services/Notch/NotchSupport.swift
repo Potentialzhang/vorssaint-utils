@@ -161,6 +161,35 @@ struct NotchCameraFit: Equatable {
     }
 }
 
+/// How far a hardware notice's black plate leaves the pill. Positive `up`
+/// lifts the top edge, positive `down` lowers the bottom edge. The idle pill
+/// and the hover rim do not use it. Half points are whole pixels at 2x.
+struct NotchNoticeEdgeFit: Equatable {
+    /// The pill already sits 8.5 points below the screen edge, so that is as
+    /// high as the top can go. The bottom stays inside the closed-notice
+    /// budget, or the row would be drawn as an open page.
+    static let upRange = -8.0...8.5
+    static let downRange = -8.0...8.0
+    static let zero = NotchNoticeEdgeFit(up: 0, down: 0)
+
+    let up: CGFloat
+    let down: CGFloat
+
+    init(up: Double, down: Double) {
+        self.up = (NotchSize.clamped(up, to: Self.upRange, fallback: 0) * 2).rounded() / 2
+        self.down = (NotchSize.clamped(down, to: Self.downRange, fallback: 0) * 2).rounded() / 2
+    }
+
+    static func current(in defaults: UserDefaults = .standard) -> NotchNoticeEdgeFit {
+        NotchNoticeEdgeFit(up: defaults.double(forKey: DefaultsKey.notchNoticeEdgeUp),
+                           down: defaults.double(forKey: DefaultsKey.notchNoticeEdgeDown))
+    }
+
+    /// Words follow the plate's centre, so a taller row does not leave them
+    /// against the old top.
+    var textDrop: CGFloat { (down - up) / 2 }
+}
+
 /// A capsule sized and placed by hand. By itself it takes the height of the
 /// menu bar around it; a fit makes it wider or narrower at rest, taller or
 /// shorter from its top edge, and lowers it from the top of the display.
@@ -473,11 +502,22 @@ enum NotchLayout {
                height: body.height + hardwareFrostTopLift)
     }
 
-    /// The notice's own plate. Top and bottom stay on the black pill, so the
-    /// row meets the capsule. Width is the notice body, not the frost rim.
-    static func hardwareNoticePlate(noticeBody: CGRect, pillBody: CGRect) -> CGRect {
-        CGRect(x: noticeBody.minX, y: pillBody.minY,
-               width: max(0, noticeBody.width), height: max(0, pillBody.height))
+    /// The notice's own plate. With no edge fit, the top and bottom stay on
+    /// the black pill. A fit moves those edges and leaves the width on the
+    /// notice body, not the frost rim.
+    static func hardwareNoticePlate(noticeBody: CGRect, pillBody: CGRect,
+                                    edges: NotchNoticeEdgeFit = .zero) -> CGRect {
+        let minY = max(0, pillBody.minY - edges.up)
+        let maxY = max(minY, pillBody.maxY + edges.down)
+        return CGRect(x: noticeBody.minX, y: minY,
+                      width: max(0, noticeBody.width), height: maxY - minY)
+    }
+
+    /// How much the window must grow so a plate that hangs below the pill is
+    /// not clipped. The pill's own bottom inset already covers the first half
+    /// point. The idle window does not grow.
+    static func hardwareNoticeExtraHeight(_ edges: NotchNoticeEdgeFit) -> CGFloat {
+        max(0, edges.down - hardwareCapsuleEdgeInset)
     }
 
     /// How far words in the full safe-area strip must drop to sit in the pill.
@@ -2986,10 +3026,11 @@ struct NotchGeometry: Equatable {
     var appPanelSize: CGSize { contentSize(for: expandedSize(module: .tools, panel: true)) }
     /// A hardware notice keeps the wing layout, and never a window narrower
     /// than the pill, or the cutout shows past the camera gap.
-    func hardwareNoticeSize(wings: NotchNoticeWings) -> CGSize {
+    func hardwareNoticeSize(wings: NotchNoticeWings, edges: NotchNoticeEdgeFit = .zero) -> CGSize {
         let spanned = noticeSize(wings: wings)
         let resting = restingSize(showsContent: false)
-        return CGSize(width: max(spanned.width, resting.width), height: resting.height)
+        return CGSize(width: max(spanned.width, resting.width),
+                      height: resting.height + NotchLayout.hardwareNoticeExtraHeight(edges))
     }
 
     func frame(for size: CGSize) -> CGRect {

@@ -1048,7 +1048,8 @@ final class NotchService: ObservableObject {
         // does. The wings are drawn clear; the pill stays black.
         if let notice {
             if geometry.isHardwareCapsule, !noticeExpanded {
-                return geometry.hardwareNoticeSize(wings: notice.wings(in: geometry))
+                return geometry.hardwareNoticeSize(wings: notice.wings(in: geometry),
+                                                   edges: NotchNoticeEdgeFit.current())
             }
             return noticeExpanded ? nil : capsuleNoticeSize(notice)
         }

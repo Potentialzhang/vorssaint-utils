@@ -87,6 +87,8 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchCustomHeight) private var customHeight = NotchSize.defaultHeight
     @AppStorage(DefaultsKey.notchCameraFitWidth) private var cameraFitWidth = 0.0
     @AppStorage(DefaultsKey.notchCameraFitHeight) private var cameraFitHeight = 0.0
+    @AppStorage(DefaultsKey.notchNoticeEdgeUp) private var noticeEdgeUp = 0.0
+    @AppStorage(DefaultsKey.notchNoticeEdgeDown) private var noticeEdgeDown = 0.0
     @AppStorage(DefaultsKey.notchCapsuleFitWidth) private var capsuleFitWidth = 0.0
     @AppStorage(DefaultsKey.notchCapsuleFitHeight) private var capsuleFitHeight = 0.0
     @AppStorage(DefaultsKey.notchCapsuleFitDrop) private var capsuleFitDrop = 0.0
@@ -124,6 +126,7 @@ struct NotchSettings: View {
          String(timerEnabled), String(timerSoundEnabled), String(hideTimerCountdown),
          String(cameraEnabled), String(accessoriesEnabled), String(outlineEnabled), String(hideMenuBarGap),
          String(customWidth), String(customHeight), String(cameraFitWidth), String(cameraFitHeight),
+         String(noticeEdgeUp), String(noticeEdgeDown),
          String(capsuleFitWidth), String(capsuleFitHeight), String(capsuleFitDrop), String(hapticFeedback),
          String(shelfWindow), String(dragReveal), String(captureControls), String(quickPanel), String(appPanel),
          String(hoverExpand), String(hideUntilHover), String(hiddenShowsActivity), String(hideInFullscreen),
@@ -297,6 +300,20 @@ struct NotchSettings: View {
                                   range: NotchCameraFit.heightRange, step: 0.5)
                     }
                     Text(text.cameraFitHint).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            // The idle pill stays on the measured capsule. Only a hardware
+            // notice's black plate follows these edges.
+            if notch.geometry.isHardwareCapsule {
+                SettingsCard(title: text.noticeEdges) {
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                        fitSlider(text.edgeUp, card: text.noticeEdges, value: $noticeEdgeUp,
+                                  range: NotchNoticeEdgeFit.upRange, step: 0.5)
+                        fitSlider(text.edgeDown, card: text.noticeEdges, value: $noticeEdgeDown,
+                                  range: NotchNoticeEdgeFit.downRange, step: 0.5)
+                    }
+                    Text(text.noticeEdgesHint).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }

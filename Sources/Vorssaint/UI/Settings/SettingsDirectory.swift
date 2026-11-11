@@ -6,7 +6,7 @@ import Foundation
 /// Only values that change which controls exist belong in the search cache key.
 struct SettingsSearchState: Equatable {
     struct Hardware: Equatable {
-        let battery, notchedDisplay, plainDisplay, keyboardLight, bluetoothSleep, brightnessOSD: Bool
+        let battery, notchedDisplay, plainDisplay, keyboardLight, bluetoothSleep, brightnessOSD, cameraCapsule: Bool
     }
 
     let hardware: Hardware
@@ -48,7 +48,8 @@ extension SettingsSearchState {
             plainDisplay: NotchSupport.hasDisplayWithoutNotch, keyboardLight: BrightnessService.keyboardLightIsSupported,
             bluetoothSleep: BluetoothSleepService.isSupported,
             brightnessOSD: AppFeature.brightness.isAvailable && UserDefaults.standard.bool(forKey: DefaultsKey.brightnessControlEnabled)
-                && BrightnessService.shared.brightnessOSDSupported))
+                && BrightnessService.shared.brightnessOSDSupported,
+            cameraCapsule: NotchService.shared.geometry.isHardwareCapsule))
     }
 }
 
@@ -267,6 +268,8 @@ enum SettingsDirectory {
             .init([notch.width, notch.maximumHeight], notch: .layout, when: state.customSize),
             .init([notch.cameraFit, notch.hideMenuBarGap, notch.width, notch.height],
                   notch: .layout, when: state.hardware.notchedDisplay),
+            .init([notch.noticeEdges, notch.edgeUp, notch.edgeDown],
+                  notch: .layout, when: state.hardware.cameraCapsule),
             .init([notch.withoutNotch], notch: .layout, when: state.hardware.plainDisplay),
             .init([notch.capsuleFit, notch.width, notch.height, notch.fromTop],
                   notch: .layout, when: state.hardware.plainDisplay && state.capsule),

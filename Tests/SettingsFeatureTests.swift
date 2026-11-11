@@ -55,7 +55,7 @@ enum SettingsFeatureTests {
         func state(battery: Bool = true) -> SettingsSearchState {
             SettingsSearchState(defaults: defaults, hardware: .init(
                 battery: battery, notchedDisplay: true, plainDisplay: false,
-                keyboardLight: true, bluetoothSleep: true, brightnessOSD: true))
+                keyboardLight: true, bluetoothSleep: true, brightnessOSD: true, cameraCapsule: false))
         }
         for (language, strings) in LocalizationTests.languages {
             let mouse = SettingsDirectory.sections(strings, language: language, state: state())

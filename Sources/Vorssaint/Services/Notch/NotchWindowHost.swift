@@ -272,6 +272,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         // at a size it already has.
         canvas.setFloatingGap(geometry.floatingGap, hardwareCapsule: geometry.isHardwareCapsule)
         canvas.setHardwarePill(geometry.isHardwareCapsule ? geometry.restingSize(showsContent: false) : nil)
+        canvas.setNoticeEdgeFit(NotchNoticeEdgeFit.current())
         // Turning the wings clear can happen at once. Turning them solid
         // across a shrink waits until that shrink is on screen, below.
         requestedClearHardwareWings = clearHardwareWings
@@ -1208,6 +1209,8 @@ private final class NotchCanvas: NSView {
     private var closingClearWings = false
     /// A closed notice draws its own plate instead of the hover frost.
     private var showsHardwareNoticePlate = false
+    /// The notice plate's own top and bottom. Zero keeps them on the pill.
+    private var noticeEdgeFit = NotchNoticeEdgeFit.zero
     /// The size the silhouette's model path was drawn for.
     private var silhouetteSize = CGSize.zero
     private var outlineEnabled = false
@@ -1339,6 +1342,17 @@ private final class NotchCanvas: NSView {
         needsLayout = true
         updateCanvasBlack()
         publishOpaquePill()
+    }
+
+    /// A slider can move the plate without resizing the window, so the mask
+    /// has to be drawn again even when the frame did not change.
+    func setNoticeEdgeFit(_ fit: NotchNoticeEdgeFit) {
+        guard noticeEdgeFit != fit else { return }
+        noticeEdgeFit = fit
+        needsLayout = true
+        updateCanvasBlack()
+        publishOpaquePill()
+        layoutSubtreeIfNeeded()
     }
 
     /// `size` is the destination. Closing onto the pill keeps the clear wings
@@ -1571,9 +1585,13 @@ private final class NotchCanvas: NSView {
     /// still on its way to the camera's, or away from it, is `offset` from there.
     func silhouettePath(for size: CGSize, offset: CGFloat = 0) -> CGPath {
         var translation = CGAffineTransform(translationX: islandX(size) + offset - silhouette.frame.minX, y: 0)
+        // The visible notice is this mask filled black. Its edges follow the
+        // slider; the idle pill and the hover rim keep their own paths.
+        if showsHardwareNoticePlate, let plate = hardwareNoticeMask(for: size) {
+            return plate.copy(using: &translation) ?? plate
+        }
         // The frost sits a point above the pill. The mask has to include it,
-        // or that lip is clipped. A notice plate meets the pill, so its mask
-        // keeps the measured inset. The idle pill does too.
+        // or that lip is clipped. The idle pill keeps the measured inset.
         let top = wingsClear && !showsHardwareNoticePlate
             ? NotchLayout.hardwareCapsuleTopInset - NotchLayout.hardwareFrostTopLift
             : NotchLayout.hardwareCapsuleTopInset
@@ -1582,6 +1600,18 @@ private final class NotchCanvas: NSView {
                               hardwareTopInset: top)
             .path(in: CGRect(origin: .zero, size: size)).cgPath
         return path.copy(using: &translation) ?? path
+    }
+
+    /// The notice's black plate in the size's own coordinates. Width follows
+    /// the notice. Height follows the pill plus the edge sliders, using the
+    /// pill's shoulders so a taller plate does not grow wider.
+    private func hardwareNoticeMask(for size: CGSize) -> CGPath? {
+        guard let pill = hardwarePill, pill.width > 0, pill.height > 0, size.width > 0 else { return nil }
+        let horizontal = NotchLayout.hardwareCapsuleBody(
+            in: CGRect(x: 0, y: 0, width: size.width, height: pill.height))
+        let pillBody = NotchLayout.hardwareCapsuleBody(in: CGRect(origin: .zero, size: pill))
+        let plate = NotchLayout.hardwareNoticePlate(noticeBody: horizontal, pillBody: pillBody, edges: noticeEdgeFit)
+        return NotchLayout.stadiumPath(for: plate)
     }
 
     /// The resize the silhouette is running, to draw the material for the
@@ -1698,9 +1728,12 @@ private final class NotchCanvas: NSView {
             // A notice fills its own row. Hover keeps the thin rim. The pill
             // stays centred on the camera either way.
             if showsHardwareNoticePlate {
-                let surface = CGRect(origin: CGPoint(x: islandX(contentSize), y: 0), size: contentSize)
+                // Shoulders stay those of the pill. A taller plate must not
+                // flare them, or the slider would also change the width.
+                let surface = CGRect(x: islandX(contentSize), y: 0, width: contentSize.width, height: pill.height)
                 let noticeBody = NotchLayout.hardwareCapsuleBody(in: surface)
-                let plateBody = NotchLayout.hardwareNoticePlate(noticeBody: noticeBody, pillBody: body)
+                let plateBody = NotchLayout.hardwareNoticePlate(noticeBody: noticeBody, pillBody: body,
+                                                                edges: noticeEdgeFit)
                 return (pillPath, nil, backdropContour(NotchLayout.stadiumPath(for: plateBody)))
             }
             let frost = NotchLayout.stadiumPath(for: NotchLayout.hardwareFrostBody(around: body))

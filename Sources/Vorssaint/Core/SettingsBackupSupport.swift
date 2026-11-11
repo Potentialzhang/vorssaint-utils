@@ -227,6 +227,8 @@ enum SettingsBackupSupport {
         // A fit measured against one Mac's camera housing would misfit another's.
         DefaultsKey.notchCameraFitWidth,
         DefaultsKey.notchCameraFitHeight,
+        DefaultsKey.notchNoticeEdgeUp,
+        DefaultsKey.notchNoticeEdgeDown,
     ]
 
     /// The file's content: an envelope with the format version, the app

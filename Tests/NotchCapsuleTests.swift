@@ -222,6 +222,23 @@ enum NotchCapsuleTests {
                      && abs(plate.width - noticeBody.width) < 0.01
                      && plate.width > frost.width,
                      "a notice plate matches the pill's top and bottom and is wider than the frost rim")
+        let edges = NotchNoticeEdgeFit(up: 2, down: 3)
+        let moved = NotchLayout.hardwareNoticePlate(noticeBody: noticeBody, pillBody: body, edges: edges)
+        suite.expect(abs(moved.minY - (body.minY - 2)) < 0.01
+                     && abs(moved.maxY - (body.maxY + 3)) < 0.01
+                     && abs(moved.minX - plate.minX) < 0.01
+                     && abs(moved.width - plate.width) < 0.01
+                     && abs(roomy.hardwareNoticeSize(wings: wings, edges: edges).height
+                            - (resting.height + NotchLayout.hardwareNoticeExtraHeight(edges))) < 0.01
+                     && roomy.hardwareNoticeSize(wings: wings).height == resting.height
+                     && NotchNoticeEdgeFit(up: 40, down: -40).up == 8.5
+                     && NotchNoticeEdgeFit(up: 40, down: -40).down == -8
+                     && NotchNoticeEdgeFit(up: .nan, down: .infinity) == .zero
+                     && Defaults.registeredDefaults[DefaultsKey.notchNoticeEdgeUp] as? Double == 0
+                     && Defaults.registeredDefaults[DefaultsKey.notchNoticeEdgeDown] as? Double == 0
+                     && SettingsBackupSupport.exportKeys().isDisjoint(with: [
+                        DefaultsKey.notchNoticeEdgeUp, DefaultsKey.notchNoticeEdgeDown]),
+                     "notice edges move off the pill, and the idle notice and other Macs stay as they are")
         let open = CGSize(width: resting.width + 200, height: 420)
         suite.expect(!NotchLayout.hardwareWingsClear(surface: open, resting: resting),
                      "an open page is not a pair of clear wings")

@@ -11,6 +11,8 @@ struct NotchNoticeView: View {
     /// and out again, and the notice leaves its own out meanwhile.
     var hidesMascot = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(DefaultsKey.notchNoticeEdgeUp) private var noticeEdgeUp = 0.0
+    @AppStorage(DefaultsKey.notchNoticeEdgeDown) private var noticeEdgeDown = 0.0
 
     private var wings: NotchNoticeWings { notice.wings(in: geometry) }
     private var tint: Color {
@@ -55,7 +57,10 @@ struct NotchNoticeView: View {
         // which sits above the pill; drop it onto the pill so it clears
         // the frost's top.
         .offset(x: (wings.trailing - wings.leading) / 2,
-                y: geometry.isHardwareCapsule ? NotchLayout.hardwareCapsuleContentDrop : 0)
+                y: geometry.isHardwareCapsule
+                    ? NotchLayout.hardwareCapsuleContentDrop
+                        + NotchNoticeEdgeFit(up: noticeEdgeUp, down: noticeEdgeDown).textDrop
+                    : 0)
         // A new reading that needs another width, as a level passing 99%,
         // moves its mark and meter with the island's steady ease, not ahead of it.
         // Keyed on the notice's own widths, so a display change does not ease it.

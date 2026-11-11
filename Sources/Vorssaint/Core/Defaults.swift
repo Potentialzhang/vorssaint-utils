@@ -869,6 +869,10 @@ enum DefaultsKey {
     // Fits the island to one Mac's camera housing; never backed up.
     static let notchCameraFitWidth = "notchCameraFitWidth"
     static let notchCameraFitHeight = "notchCameraFitHeight"
+    /// A hardware notice's top and bottom, measured on this display. Positive
+    /// grows the plate off the pill. Not backed up.
+    static let notchNoticeEdgeUp = "notchNoticeEdgeUp"
+    static let notchNoticeEdgeDown = "notchNoticeEdgeDown"
     static let notchHapticFeedback = "notchHapticFeedback"
     static let notchTranslucentBackground = "notchTranslucentBackground"
     static let notchShelf = "notchShelf"
@@ -1492,6 +1496,8 @@ enum Defaults {
         DefaultsKey.notchCustomHeight: NotchSize.defaultHeight,
         DefaultsKey.notchCameraFitWidth: 0.0,
         DefaultsKey.notchCameraFitHeight: 0.0,
+        DefaultsKey.notchNoticeEdgeUp: 0.0,
+        DefaultsKey.notchNoticeEdgeDown: 0.0,
         DefaultsKey.notchHapticFeedback: true,
         DefaultsKey.notchTranslucentBackground: false,
         DefaultsKey.notchShelf: true,
