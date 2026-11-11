@@ -35,9 +35,9 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     /// The wing fill the presentation asked for. A close keeps the previous
     /// clear wings until the shrink settles, so this is applied then.
     private var requestedClearHardwareWings = false
-    /// A closed notice's own plate. Turned on at once. Turned off when the
-    /// shrink settles, so a close does not swap the plate for the hover rim
-    /// while the wide shape is still on screen.
+    /// A closed notice's own plate. It is on only while that notice is showing.
+    /// A dismiss drops it at once: holding it through the shrink left the
+    /// notice's wider black capsule on screen whenever the close did not settle.
     private var requestedHardwareNoticePlate = false
     private var mouseEventsBeforeHide: Bool?
     private var frameProbe: NotchFrameProbe?
@@ -277,10 +277,10 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         // across a shrink waits until that shrink is on screen, below.
         requestedClearHardwareWings = clearHardwareWings
         if clearHardwareWings { canvas.setClearsHardwareWings(true) }
-        // The notice plate comes on at once. It stays through a shrink and
-        // lets go when that shrink settles, same as the clear wings.
+        // The notice plate follows the notice. Off the moment it is gone, so
+        // the close animates the pill and cannot leave the wider plate behind.
         requestedHardwareNoticePlate = hardwareNoticePlate
-        if hardwareNoticePlate { canvas.setShowsHardwareNoticePlate(true) }
+        canvas.setShowsHardwareNoticePlate(hardwareNoticePlate)
         hidesWhenSettled = hideWhenSettled
         if relocationHidden { panel.holdsWave = !hideWhenSettled }
         if hideWhenSettled {
@@ -317,8 +317,16 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         let gutter = quickAccessConfiguration == nil ? 0 : NotchQuickAccessLayout.gutter
         let bottom = quickAccessBottomInset(for: size, geometry: geometry)
         let frame = geometry.frame(for: CGSize(width: size.width + gutter * 2, height: size.height + bottom))
+        let alignedTarget = pixelAligned(frame)
+        // A close that reserved the notice's bounds and then did not settle
+        // leaves the window wider than the pill. That is still a resize: the
+        // applied frame matches the window, so the mismatch would otherwise
+        // look like nothing changed and the wide black capsule would stay.
+        let abandonedReservation = !isAnimating && (panel.frame.width > alignedTarget.width + 1
+                                                    || panel.frame.height > alignedTarget.height + 1)
         let changesFrame = revealing || relocationHidden || (hideWhenSettled && !canAnimate) || size != targetSize
             || frame != previousFrame || (!isAnimating && panel.frame != appliedFrame)
+            || abandonedReservation
         targetUsesGlass = usesGlass
         if canvas.backdropPresentation.stripHeight != geometry.stripHeight {
             canvas.backdropPresentation.stripHeight = geometry.stripHeight
@@ -338,9 +346,11 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         guard changesFrame || transitionContent != .none else {
             // A refresh that does not resize must not flood wings an animation
             // is still shrinking. That animation settles them itself.
+            // The notice plate does not wait: a dismiss has already dropped it.
             if !isAnimating {
-                canvas.setClearsHardwareWings(requestedClearHardwareWings)
                 canvas.setShowsHardwareNoticePlate(requestedHardwareNoticePlate)
+                canvas.layoutSubtreeIfNeeded()
+                canvas.setClearsHardwareWings(requestedClearHardwareWings)
             }
             currentGeometry = geometry
             configureQuickAccess()
@@ -357,8 +367,9 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         } else { canvas.restoreContent() }
         guard changesFrame else {
             if !isAnimating {
-                canvas.setClearsHardwareWings(requestedClearHardwareWings)
                 canvas.setShowsHardwareNoticePlate(requestedHardwareNoticePlate)
+                canvas.layoutSubtreeIfNeeded()
+                canvas.setClearsHardwareWings(requestedClearHardwareWings)
             }
             configureQuickAccess()
             return
@@ -505,8 +516,13 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         guard generation == animationGeneration else { return }
         isAnimating = false
         canvas.stopMotion()
-        canvas.setClearsHardwareWings(requestedClearHardwareWings)
+        // Drop the notice plate and draw the destination before the wings fill.
+        // Filling first painted the notice's wider stadium black, and a settle
+        // that stopped there left that capsule on top of the pill.
         canvas.setShowsHardwareNoticePlate(requestedHardwareNoticePlate)
+        canvas.setContentSize(targetSize)
+        canvas.layoutSubtreeIfNeeded()
+        canvas.setClearsHardwareWings(requestedClearHardwareWings)
         canvas.setUsesGlass(targetUsesGlass)
         // Settled glass is fully open, whatever a cut-short transition planned.
         if targetUsesGlass { canvas.backdropPresentation.openFully() }
@@ -1334,8 +1350,9 @@ private final class NotchCanvas: NSView {
         publishOpaquePill()
     }
 
-    /// The notice plate is independent of the hover frost. Turning it on can
-    /// happen at once. Turning it off waits until a shrink has settled.
+    /// The notice plate is independent of the hover frost. It turns on and off
+    /// with the notice. The caller lays the mask out afterwards: doing it here
+    /// re-enters presentation while the old notice size is still current.
     func setShowsHardwareNoticePlate(_ show: Bool) {
         guard showsHardwareNoticePlate != show else { return }
         showsHardwareNoticePlate = show
@@ -1670,8 +1687,8 @@ private final class NotchCanvas: NSView {
     /// fill gives way as the backdrop's resting black does.
     func updateCanvasBlack() {
         // Hover wings stay clear so the thin frost can show the menu bar.
-        // A notice plate is black on its own, including while it shrinks,
-        // so the row does not flash clear ahead of the SwiftUI fill.
+        // A notice plate is black only while the notice is showing. A dismiss
+        // drops it before the shrink, so the wider plate cannot stay behind.
         let alpha: CGFloat = wingsClear && !showsHardwareNoticePlate
             ? 0 : (usesGlass ? CGFloat(backdropPresentation.restingBlack) : 1)
         let color = NSColor.black.withAlphaComponent(alpha).cgColor
