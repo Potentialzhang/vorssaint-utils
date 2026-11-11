@@ -32,6 +32,13 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     private var isAnimating = false
     private var hidesWhenSettled = false
     private var targetUsesGlass = false
+    /// The wing fill the presentation asked for. A close keeps the previous
+    /// clear wings until the shrink settles, so this is applied then.
+    private var requestedClearHardwareWings = false
+    /// A closed notice's own plate. Turned on at once. Turned off when the
+    /// shrink settles, so a close does not swap the plate for the hover rim
+    /// while the wide shape is still on screen.
+    private var requestedHardwareNoticePlate = false
     private var mouseEventsBeforeHide: Bool?
     private var frameProbe: NotchFrameProbe?
     private var missionControlTimer: Timer?
@@ -92,7 +99,8 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             guard let self else { return nil }
             return self.currentGeometry.screen.midX - self.panel.frame.minX - self.canvas.convert(CGPoint.zero, to: nil).x
         }
-        canvas.setFloatingGap(geometry.floatingGap)
+        canvas.setFloatingGap(geometry.floatingGap, hardwareCapsule: geometry.isHardwareCapsule)
+        canvas.setHardwarePill(geometry.isHardwareCapsule ? geometry.restingSize(showsContent: false) : nil)
         canvas.layoutSubtreeIfNeeded()
         appliedFrame = panel.frame
         overlaySpace?.add(panel)
@@ -258,10 +266,20 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
 
     func present(size: CGSize, geometry: NotchGeometry, animated: Bool, transitionContent: NotchContentTransition = .none,
                  quickAccess: NotchQuickAccessConfiguration? = nil, revealFromHidden: Bool = false,
-                 hideWhenSettled: Bool = false, usesGlass: Bool = false, steady: Bool = false) {
+                 hideWhenSettled: Bool = false, usesGlass: Bool = false, steady: Bool = false,
+                 clearHardwareWings: Bool = false, hardwareNoticePlate: Bool = false) {
         // Choosing the capsule or the notch redraws the island at once, even
         // at a size it already has.
-        canvas.setFloatingGap(geometry.floatingGap)
+        canvas.setFloatingGap(geometry.floatingGap, hardwareCapsule: geometry.isHardwareCapsule)
+        canvas.setHardwarePill(geometry.isHardwareCapsule ? geometry.restingSize(showsContent: false) : nil)
+        // Turning the wings clear can happen at once. Turning them solid
+        // across a shrink waits until that shrink is on screen, below.
+        requestedClearHardwareWings = clearHardwareWings
+        if clearHardwareWings { canvas.setClearsHardwareWings(true) }
+        // The notice plate comes on at once. It stays through a shrink and
+        // lets go when that shrink settles, same as the clear wings.
+        requestedHardwareNoticePlate = hardwareNoticePlate
+        if hardwareNoticePlate { canvas.setShowsHardwareNoticePlate(true) }
         hidesWhenSettled = hideWhenSettled
         if relocationHidden { panel.holdsWave = !hideWhenSettled }
         if hideWhenSettled {
@@ -317,6 +335,12 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         // island and the option it changes syncs preferences mid-close.
         canvas.setUsesGlass(usesGlass || (((canAnimate && changesFrame) || isAnimating) && canvas.usesGlass))
         guard changesFrame || transitionContent != .none else {
+            // A refresh that does not resize must not flood wings an animation
+            // is still shrinking. That animation settles them itself.
+            if !isAnimating {
+                canvas.setClearsHardwareWings(requestedClearHardwareWings)
+                canvas.setShowsHardwareNoticePlate(requestedHardwareNoticePlate)
+            }
             currentGeometry = geometry
             configureQuickAccess()
             if !isAnimating { quickAccessContainer?.motion.setVisible(quickAccessConfiguration != nil, animated: canAnimate) }
@@ -330,12 +354,20 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             // ahead of the surface drawn beneath it. A fade is not motion.
             canvas.transitionContent(.reveal, shapeSnaps: true)
         } else { canvas.restoreContent() }
-        guard changesFrame else { configureQuickAccess(); return }
+        guard changesFrame else {
+            if !isAnimating {
+                canvas.setClearsHardwareWings(requestedClearHardwareWings)
+                canvas.setShowsHardwareNoticePlate(requestedHardwareNoticePlate)
+            }
+            configureQuickAccess()
+            return
+        }
         // An ordered-out panel still has its last expanded shape. Start the
         // reveal at the screen edge, even when reopening at that same size.
         let previousWidth = revealing ? geometry.collapsed.width : canvas.bounds.width
         let previousPath = revealing
-            ? NotchShape(attached: true, radius: 0, floatingGap: geometry.floatingGap)
+            ? NotchShape(attached: true, radius: 0, floatingGap: geometry.floatingGap,
+                         hardwareCapsule: geometry.isHardwareCapsule)
                 .path(in: CGRect(x: 0, y: 0, width: previousWidth, height: 0)).cgPath
             : canvas.visiblePath
         let sameScreen = geometry.screen == currentGeometry.screen
@@ -393,6 +425,9 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         // The window is drawn as its frame changes, before the motion is
         // installed. Until then the silhouette and its material keep the
         // shape on screen instead of showing the target for a frame.
+        // Closing onto the pill keeps the wings clear while they shrink. Filling
+        // them the moment the target is the pill paints the still-large shape black.
+        canvas.prepareHardwareWings(clear: requestedClearHardwareWings, animatingTo: size)
         canvas.motionStart = start
         canvas.motionStartOffset = startOffset
         defer { canvas.motionStart = nil; canvas.motionStartOffset = 0 }
@@ -469,6 +504,8 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         guard generation == animationGeneration else { return }
         isAnimating = false
         canvas.stopMotion()
+        canvas.setClearsHardwareWings(requestedClearHardwareWings)
+        canvas.setShowsHardwareNoticePlate(requestedHardwareNoticePlate)
         canvas.setUsesGlass(targetUsesGlass)
         // Settled glass is fully open, whatever a cut-short transition planned.
         if targetUsesGlass { canvas.backdropPresentation.openFully() }
@@ -1158,6 +1195,19 @@ private final class NotchCanvas: NSView {
     private let edgeMask = CALayer()
     /// Nil hangs the island from the top edge; a capsule floats this far inside it.
     private(set) var floatingGap: CGFloat?
+    /// A hardware capsule draws the system pill inside the safe area, rather
+    /// than a margin applied equally above and below.
+    private var hardwareCapsule = false
+    /// The closed pill a hardware capsule keeps black while its wings are clear.
+    private var hardwarePill: CGSize?
+    /// The presentation wants clear wings. Distinct from a close that is
+    /// still shrinking those wings back onto the pill.
+    private var targetClearsWings = false
+    /// True while a close animates onto the pill, so the wings do not fill
+    /// black for the frames they are still on screen.
+    private var closingClearWings = false
+    /// A closed notice draws its own plate instead of the hover frost.
+    private var showsHardwareNoticePlate = false
     /// The size the silhouette's model path was drawn for.
     private var silhouetteSize = CGSize.zero
     private var outlineEnabled = false
@@ -1263,9 +1313,69 @@ private final class NotchCanvas: NSView {
     /// Switching between the capsule and the hanging outline redraws the
     /// resting island at once. A capsule's outline goes all the way round:
     /// it floats clear of the screen's edge.
-    func setFloatingGap(_ gap: CGFloat?) {
-        guard floatingGap != gap else { return }
+    func setHardwarePill(_ size: CGSize?) {
+        guard hardwarePill != size else { return }
+        hardwarePill = size
+        updateCanvasBlack()
+        publishOpaquePill()
+    }
+
+    /// The resting pill stays black. Wings clear only when this presentation
+    /// asked for it and the surface has actually grown into them.
+    func setClearsHardwareWings(_ clear: Bool) {
+        let changed = targetClearsWings != clear || closingClearWings
+        targetClearsWings = clear
+        closingClearWings = false
+        guard changed else { return }
+        updateCanvasBlack()
+        publishOpaquePill()
+    }
+
+    /// The notice plate is independent of the hover frost. Turning it on can
+    /// happen at once. Turning it off waits until a shrink has settled.
+    func setShowsHardwareNoticePlate(_ show: Bool) {
+        guard showsHardwareNoticePlate != show else { return }
+        showsHardwareNoticePlate = show
+        needsLayout = true
+        updateCanvasBlack()
+        publishOpaquePill()
+    }
+
+    /// `size` is the destination. Closing onto the pill keeps the clear wings
+    /// through the shrink. Anything taller, such as an open page, fills at once.
+    func prepareHardwareWings(clear: Bool, animatingTo size: CGSize) {
+        if clear {
+            setClearsHardwareWings(true)
+            return
+        }
+        if let pill = hardwarePill, wingsClear,
+           abs(size.width - pill.width) < 0.5, abs(size.height - pill.height) < 0.5 {
+            beginClosingClearWings()
+            return
+        }
+        setClearsHardwareWings(false)
+    }
+
+    private func beginClosingClearWings() {
+        closingClearWings = true
+        targetClearsWings = false
+        updateCanvasBlack()
+        publishOpaquePill()
+    }
+
+    /// Wings of a closed hardware capsule are clear. The canvas itself must
+    /// not stay black, or that black shows through the mask around the pill.
+    private var wingsClear: Bool {
+        guard hardwareCapsule, let pill = hardwarePill else { return false }
+        if closingClearWings { return true }
+        guard targetClearsWings else { return false }
+        return NotchLayout.hardwareWingsClear(surface: contentSize, resting: pill)
+    }
+
+    func setFloatingGap(_ gap: CGFloat?, hardwareCapsule: Bool = false) {
+        guard floatingGap != gap || self.hardwareCapsule != hardwareCapsule else { return }
         floatingGap = gap
+        self.hardwareCapsule = hardwareCapsule
         stopMotion()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -1461,8 +1571,15 @@ private final class NotchCanvas: NSView {
     /// still on its way to the camera's, or away from it, is `offset` from there.
     func silhouettePath(for size: CGSize, offset: CGFloat = 0) -> CGPath {
         var translation = CGAffineTransform(translationX: islandX(size) + offset - silhouette.frame.minX, y: 0)
+        // The frost sits a point above the pill. The mask has to include it,
+        // or that lip is clipped. A notice plate meets the pill, so its mask
+        // keeps the measured inset. The idle pill does too.
+        let top = wingsClear && !showsHardwareNoticePlate
+            ? NotchLayout.hardwareCapsuleTopInset - NotchLayout.hardwareFrostTopLift
+            : NotchLayout.hardwareCapsuleTopInset
         let path = NotchShape(attached: true, radius: NotchLayout.surfaceRadius(height: size.height),
-                              floatingGap: floatingGap)
+                              floatingGap: floatingGap, hardwareCapsule: hardwareCapsule,
+                              hardwareTopInset: top)
             .path(in: CGRect(origin: .zero, size: size)).cgPath
         return path.copy(using: &translation) ?? path
     }
@@ -1522,7 +1639,11 @@ private final class NotchCanvas: NSView {
     /// frame as it began to open or settled after closing. Under glass the
     /// fill gives way as the backdrop's resting black does.
     func updateCanvasBlack() {
-        let alpha = usesGlass ? CGFloat(backdropPresentation.restingBlack) : 1
+        // Hover wings stay clear so the thin frost can show the menu bar.
+        // A notice plate is black on its own, including while it shrinks,
+        // so the row does not flash clear ahead of the SwiftUI fill.
+        let alpha: CGFloat = wingsClear && !showsHardwareNoticePlate
+            ? 0 : (usesGlass ? CGFloat(backdropPresentation.restingBlack) : 1)
         let color = NSColor.black.withAlphaComponent(alpha).cgColor
         guard layer?.backgroundColor != color else { return }
         CATransaction.begin()
@@ -1561,6 +1682,52 @@ private final class NotchCanvas: NSView {
         // Core Animation commits this transaction.
         let path = backdropDisplayLink == nil ? silhouette.path.map(inCanvas) : visiblePath
         if let path { setBackdropContour(path) }
+        publishOpaquePill()
+    }
+
+    /// The pill in the backdrop's coordinates. Centred on the camera, not on
+    /// the window: a notice with unequal wings shifts the window, and a pill
+    /// centred there would slide off the cutout.
+    private func publishOpaquePill() {
+        let drawn: (pill: Path, frost: Path?, plate: Path?)? = {
+            guard wingsClear, let pill = hardwarePill, pill.width > 0, pill.height > 0 else { return nil }
+            let centre = stageCentreX?() ?? (islandX(contentSize) + contentSize.width / 2)
+            let rect = CGRect(origin: CGPoint(x: centre - pill.width / 2, y: 0), size: pill)
+            let body = NotchLayout.hardwareCapsuleBody(in: rect)
+            let pillPath = backdropContour(NotchLayout.hardwareCapsulePath(in: rect))
+            // A notice fills its own row. Hover keeps the thin rim. The pill
+            // stays centred on the camera either way.
+            if showsHardwareNoticePlate {
+                let surface = CGRect(origin: CGPoint(x: islandX(contentSize), y: 0), size: contentSize)
+                let noticeBody = NotchLayout.hardwareCapsuleBody(in: surface)
+                let plateBody = NotchLayout.hardwareNoticePlate(noticeBody: noticeBody, pillBody: body)
+                return (pillPath, nil, backdropContour(NotchLayout.stadiumPath(for: plateBody)))
+            }
+            let frost = NotchLayout.stadiumPath(for: NotchLayout.hardwareFrostBody(around: body))
+            return (pillPath, backdropContour(frost), nil)
+        }()
+        func matches(_ previous: CGRect?, _ next: CGRect?) -> Bool {
+            switch (previous, next) {
+            case (nil, nil): return true
+            case let (previous?, next?):
+                return abs(previous.minX - next.minX) < 0.5 && abs(previous.minY - next.minY) < 0.5
+                    && abs(previous.width - next.width) < 0.5 && abs(previous.height - next.height) < 0.5
+            default: return false
+            }
+        }
+        // The pill rect does not change between hover and a notice. The frost
+        // and the plate do, and an unchanged pill must not keep the other one up.
+        guard !matches(backdropPresentation.opaquePill?.boundingRect, drawn?.pill.boundingRect)
+                || !matches(backdropPresentation.wingFrost?.boundingRect, drawn?.frost?.boundingRect)
+                || !matches(backdropPresentation.noticePlate?.boundingRect, drawn?.plate?.boundingRect) else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            backdropPresentation.opaquePill = drawn?.pill
+            backdropPresentation.wingFrost = drawn?.frost
+            backdropPresentation.noticePlate = drawn?.plate
+        }
+        updateCanvasBlack()
     }
 
     /// A canvas path in the backdrop's own coordinates.

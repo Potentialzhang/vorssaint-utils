@@ -45,10 +45,17 @@ struct NotchNoticeView: View {
                 .clipped()
         }
         .foregroundStyle(.white)
+        // The frost is light, so the words keep a soft shadow on a pale menu bar.
+        .shadow(color: geometry.isHardwareCapsule ? .black.opacity(0.45) : .clear,
+                radius: geometry.isHardwareCapsule ? 1.2 : 0, y: 0.5)
         .frame(height: geometry.stripHeight)
         // Each side is as wide as what it shows, so the island reaches
         // further toward the wider one and the camera's gap stays over it.
-        .offset(x: (wings.trailing - wings.leading) / 2)
+        // On a hardware capsule the row is centred in the safe-area band,
+        // which sits above the pill; drop it onto the pill so it clears
+        // the frost's top.
+        .offset(x: (wings.trailing - wings.leading) / 2,
+                y: geometry.isHardwareCapsule ? NotchLayout.hardwareCapsuleContentDrop : 0)
         // A new reading that needs another width, as a level passing 99%,
         // moves its mark and meter with the island's steady ease, not ahead of it.
         // Keyed on the notice's own widths, so a display change does not ease it.
@@ -124,7 +131,8 @@ struct NotchNoticeView: View {
             Text(content.compactDetail)
                 .font(Font(NotchNotificationBannerLayout.messageFont as CTFont))
                 .foregroundStyle(.white.opacity(0.85))
-                .lineLimit(NotchNotificationBannerLayout.messageLines(stripHeight: geometry.stripHeight))
+                .lineLimit(geometry.isHardwareCapsule ? 1
+                          : NotchNotificationBannerLayout.messageLines(stripHeight: geometry.stripHeight))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         } else if let level = notice.level {
             NotchMeter(value: level, height: 5, tint: tint)

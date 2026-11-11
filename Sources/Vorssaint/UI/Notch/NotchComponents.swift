@@ -483,6 +483,15 @@ struct NotchBandRow<Leading: View, Trailing: View>: View {
 /// this in canvas coordinates avoids scaling the glass's corners independently.
 final class NotchBackdropPresentation: ObservableObject {
     @Published var contour = Path()
+    /// The black pill when a hardware capsule's wings are clear. Nil fills
+    /// the whole contour, which is the resting pill and every open page.
+    @Published var opaquePill: Path?
+    /// A thin, faint frost around `opaquePill`. Hover only. Nil with the pill,
+    /// and nil while a notice draws `noticePlate` instead.
+    @Published var wingFrost: Path?
+    /// A closed notice's own black plate. Top and bottom match the pill.
+    /// Nil on hover, at rest, and on every open page.
+    @Published var noticePlate: Path?
     @Published var usesGlass = false
     /// The camera strip's height in points, which the translucent background
     /// keeps black at every island height.
@@ -561,7 +570,9 @@ struct NotchSurfaceBackground: View {
             // the glass has opened, and the glass exists only while that
             // black lets it show, so the window's resizes at either end of a
             // transition happen in plain black.
-            Color.black.opacity(showsGlass || showsTranslucent ? presentation.restingBlack : 1)
+            hardwareWingFrost
+            hardwareNoticePlate
+            restingBlackFill
 #if compiler(>=6.2)
             if #available(macOS 26, *), showsGlass, presentation.restingBlack < 1 {
                 let shape = NotchBackdropShape(contour: presentation.contour)
@@ -585,6 +596,47 @@ struct NotchSurfaceBackground: View {
         .environment(\.colorScheme, .dark)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    /// A faint rim around the black pill. Hover only. Liquid Glass is too
+    /// heavy here: its lens is wide and its top rim covers the words. This is
+    /// a barely-there blur of the menu bar, a couple of points past the pill.
+    @ViewBuilder private var hardwareWingFrost: some View {
+        if let frost = presentation.wingFrost {
+            let shape = NotchBackdropShape(contour: frost)
+            let box = frost.boundingRect
+            if !box.isNull, box.width > 1, box.height > 1 {
+                if reduceTransparency {
+                    shape.fill(.black.opacity(contrast == .increased ? 0.22 : 0.1))
+                } else {
+                    NotchTranslucentMaterial(contour: frost.offsetBy(dx: -box.minX, dy: -box.minY).cgPath,
+                                             strength: 0.22)
+                        .frame(width: box.width, height: box.height)
+                        .padding(EdgeInsets(top: box.minY, leading: box.minX, bottom: 0, trailing: 0))
+                }
+            }
+        }
+    }
+
+    /// The notice's own background. Opaque black, so it does not share the
+    /// hover rim and does not show the camera hole. The pill is drawn over
+    /// the same black, and the two meet without a seam.
+    @ViewBuilder private var hardwareNoticePlate: some View {
+        if let plate = presentation.noticePlate {
+            NotchBackdropShape(contour: plate).fill(Color.black)
+        }
+    }
+
+    /// Black under the shape. A hardware capsule's hover wings take the frost
+    /// above, and a notice takes the plate. Only the pill that covers the
+    /// camera is filled when neither is drawn.
+    @ViewBuilder private var restingBlackFill: some View {
+        let alpha = showsGlass || showsTranslucent ? presentation.restingBlack : 1.0
+        if let pill = presentation.opaquePill {
+            NotchBackdropShape(contour: pill).fill(Color.black.opacity(alpha))
+        } else {
+            Color.black.opacity(alpha)
+        }
     }
 
     /// The dimming over the glass, from the top of the island to its lip. Near
@@ -637,6 +689,9 @@ extension NotchSurfaceBackground {
 /// so the mask follows the island's contour as it animates.
 private struct NotchTranslucentMaterial: NSViewRepresentable {
     let contour: CGPath
+    /// 1 is the open island's blur. A hardware rim uses a small fraction,
+    /// so the menu bar still reads through it.
+    var strength: CGFloat = 1
 
     func makeNSView(context: Context) -> NotchTranslucentView {
         let view = NotchTranslucentView()
@@ -644,17 +699,22 @@ private struct NotchTranslucentMaterial: NSViewRepresentable {
         view.blendingMode = .behindWindow
         view.state = .active
         view.appearance = NSAppearance(named: .darkAqua)
+        view.strength = strength
         return view
     }
 
     func updateNSView(_ view: NotchTranslucentView, context: Context) {
         view.contour = contour
+        view.strength = strength
     }
 }
 
 private final class NotchTranslucentView: NSVisualEffectView {
     var contour: CGPath? {
         didSet { if contour != oldValue { updateMask() } }
+    }
+    var strength: CGFloat = 1 {
+        didSet { if strength != oldValue { alphaValue = strength } }
     }
 
     override var isFlipped: Bool { true }

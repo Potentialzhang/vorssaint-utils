@@ -10,10 +10,13 @@ import SwiftUI
 /// capsule. The capsule sits centred inside the bar; closed, it runs its
 /// content from end to end and is as wide as that content, within limits the
 /// bar and its kind set; open, it keeps the island's sizes with its header
-/// clear of the rounded corners. A physical camera never floats.
+/// clear of the rounded corners. A wide camera housing never floats. A short
+/// one, as on a PROLED display, is covered by a capsule instead.
 enum NotchCapsuleTests {
     static func run(_ suite: TestSuite) {
         preferenceContracts(suite)
+        hardwareCapsuleContracts(suite)
+        hardwareDodgeContracts(suite)
         placementContracts(suite)
         outlineContracts(suite)
         stripContracts(suite)
@@ -108,6 +111,123 @@ enum NotchCapsuleTests {
         suite.expect(!simulated.floats && simulated == NotchGeometry(screen: screen, safeAreaTop: 0, cameraWidth: 0,
                                                                     silhouette: .notch),
                      "the simulated notch is unchanged when chosen")
+    }
+
+    /// A 59×40 housing is the measured PROLED safe area. The black capsule
+    /// sits inside it, off the screen edge. An open page is not split around
+    /// it. A classic notch, including one scaled with its menu bar, stays a notch.
+    private static func hardwareCapsuleContracts(_ suite: TestSuite) {
+        let screen = CGRect(x: 0, y: 0, width: 1736, height: 1133)
+        let wide = NotchGeometry(screen: screen, safeAreaTop: 32, cameraWidth: 185, menuBarHeight: 39, silhouette: .capsule)
+        suite.expect(wide.isNotched && !wide.isHardwareCapsule && !wide.floats && wide.floatingGap == nil,
+                     "a wide camera housing keeps the hanging notch, whatever shape was asked for")
+
+        let asked = NotchCapsuleFit(width: -40, height: -4, drop: 20)
+        let capsule = NotchGeometry(screen: screen, safeAreaTop: 40, cameraWidth: 59, menuBarHeight: 45,
+                                    cameraFit: NotchCameraFit(width: 2, height: 1), silhouette: .notch,
+                                    capsuleFit: asked, outline: true)
+        let resting = capsule.restingSize(showsContent: false)
+        let body = NotchLayout.hardwareCapsuleBody(in: CGRect(origin: .zero, size: resting))
+        let visible = CGRect(x: (resting.width - 58) / 2, y: NotchLayout.hardwareCapsuleTopInset, width: 58, height: 31)
+        suite.expect(capsule.isHardwareCapsule && capsule.floats && !capsule.isNotched && capsule.floatingGap == 0
+                     && capsule.floatingDrop == 0 && capsule.cameraHeight == 43,
+                     "a short camera housing is a capsule the size of its safe area, not the menu bar")
+        suite.expect(body.minY == NotchLayout.hardwareCapsuleTopInset && body.contains(visible)
+                     && capsule.frame(for: resting).maxY == screen.maxY
+                     && capsule.headerCameraGap == 0 && capsule.headerTopInset >= capsule.cameraHeight
+                     && capsule.safeContentTop >= capsule.cameraHeight,
+                     "the drawn pill is the system capsule, off the screen edge, and an open page starts below the safe area")
+        let plain = NotchGeometry(screen: screen, safeAreaTop: 40, cameraWidth: 59, menuBarHeight: 45)
+        let plainBody = NotchLayout.hardwareCapsuleBody(
+            in: CGRect(origin: .zero, size: plain.restingSize(showsContent: false)))
+        suite.expect(abs(plainBody.minY - 8.5) < 0.01 && abs(plainBody.height - 31) < 0.01
+                     && abs(plainBody.width - 58) < 1,
+                     "with no fit, the closed pill matches the measured system capsule")
+        let crowded = NotchGeometry(screen: screen, safeAreaTop: 40, cameraWidth: 59, menuBarHeight: 45,
+                                    compactSideRoom: 0)
+        let crowdedBody = NotchLayout.hardwareCapsuleBody(
+            in: CGRect(origin: .zero, size: crowded.restingSize(showsContent: false)))
+        suite.expect(crowdedBody.minY > 0 && crowdedBody.width + 0.01 >= 58 && crowdedBody.height + 0.01 >= 31,
+                     "menus with no free room can narrow the pill, but not onto the screen edge or off the system capsule")
+
+        for bar: CGFloat in [16, 24, 32, 40, 64] {
+            let physical = NotchGeometry(screen: screen, safeAreaTop: bar, cameraWidth: 180 * bar / 32, menuBarHeight: bar)
+            suite.expect(physical.isNotched && !physical.isHardwareCapsule && !physical.floats,
+                         "a classic notch profile stays a notch at every menu bar height")
+        }
+        let tallWide = NotchGeometry(screen: screen, safeAreaTop: 64, cameraWidth: 210, menuBarHeight: 24)
+        suite.expect(tallWide.isNotched && !tallWide.isHardwareCapsule && !tallWide.floats
+                     && tallWide.headerCameraGap == 210,
+                     "a wide camera with a tall safe area still wraps the page beside it")
+    }
+
+    /// A hardware capsule's hover and its notices grow on both sides. The
+    /// black stays the resting pill; the wings are clear. An open page is
+    /// not treated as wings. A hanging notch is unchanged.
+    private static func hardwareDodgeContracts(_ suite: TestSuite) {
+        let screen = CGRect(x: 0, y: 0, width: 1736, height: 1133)
+        func housing(room: CGFloat?) -> NotchGeometry {
+            NotchGeometry(screen: screen, safeAreaTop: 40, cameraWidth: 59, menuBarHeight: 45, compactSideRoom: room)
+        }
+        let roomy = housing(room: 220)
+        let resting = roomy.restingSize(showsContent: false)
+        let hover = NotchHoverEmphasis.size(from: resting, geometry: roomy, leading: true)
+        let restingFrame = roomy.frame(for: resting)
+        let hoverFrame = roomy.frame(for: hover)
+        suite.expect(abs(hover.width - resting.width - NotchHoverEmphasis.hardwareReach * 2) < 0.01
+                     && abs(hover.height - resting.height - NotchHoverEmphasis.hardwareDrop) < 0.01
+                     && abs(hoverFrame.midX - screen.midX) < 0.001
+                     && hoverFrame.minX < restingFrame.minX - 40
+                     && hoverFrame.maxX > restingFrame.maxX + 40
+                     && NotchLayout.hardwareWingsClear(surface: hover, resting: resting)
+                     && !NotchLayout.hardwareWingsClear(surface: resting, resting: resting),
+                     "hover grows a hardware capsule equally on both sides, and only the pill stays black")
+        let symmetric = NotchHoverEmphasis.size(from: resting, geometry: roomy)
+        suite.expect(abs(symmetric.width - resting.width - 20) < 0.01 && symmetric.height == resting.height,
+                     "without the clear reach, a hardware capsule keeps the centred pulse")
+        let crowdedResting = housing(room: 0).restingSize(showsContent: false)
+        let crowdedHover = NotchHoverEmphasis.size(from: crowdedResting, geometry: housing(room: 0), leading: true)
+        suite.expect(crowdedHover.width == crowdedResting.width
+                     && abs(crowdedHover.height - crowdedResting.height - NotchHoverEmphasis.hardwareDrop) < 0.01
+                     && NotchLayout.hardwareWingsClear(surface: crowdedHover, resting: crowdedResting),
+                     "a crowded bar grows no wing, but the lip still drops and stays clear")
+        let unmeasured = housing(room: nil)
+        let bare = unmeasured.restingSize(showsContent: false)
+        suite.expect(abs(NotchHoverEmphasis.size(from: bare, geometry: unmeasured, leading: true).width
+                         - bare.width - NotchHoverEmphasis.hardwareReach * 2) < 0.01,
+                     "an unmeasured bar still grows the hover reach on both sides")
+        let wings = NotchNoticeWings(leading: 140, trailing: 90)
+        let notice = roomy.hardwareNoticeSize(wings: wings)
+        var shifted = roomy
+        shifted.surfaceShift = roomy.noticeShift(wings)
+        suite.expect(notice.width > resting.width && notice.height == resting.height
+                     && notice.width >= roomy.noticeSize(wings: wings).width
+                     && abs(shifted.frame(for: notice).midX - (screen.midX + roomy.noticeShift(wings))) < 0.01
+                     && NotchLayout.hardwareWingsClear(surface: notice, resting: resting),
+                     "a notice keeps a wing on each side of the pill, and those wings are clear")
+        let body = NotchLayout.hardwareCapsuleBody(in: CGRect(origin: .zero, size: resting))
+        let frost = NotchLayout.hardwareFrostBody(around: body)
+        suite.expect(abs(frost.maxY - body.maxY) < 0.01
+                     && abs(body.minY - frost.minY - NotchLayout.hardwareFrostTopLift) < 0.01
+                     && abs(frost.minX - (body.minX - NotchLayout.hardwareFrostLip)) < 0.01
+                     && abs(frost.width - body.width - NotchLayout.hardwareFrostLip * 2) < 0.01
+                     && abs(NotchLayout.hardwareCapsuleContentDrop - 4) < 0.01,
+                     "the frost is a thin rim: a point above the pill, the same bottom, and words drop into the pill")
+        let noticeBody = NotchLayout.hardwareCapsuleBody(in: CGRect(origin: .zero, size: notice))
+        let plate = NotchLayout.hardwareNoticePlate(noticeBody: noticeBody, pillBody: body)
+        suite.expect(abs(plate.minY - body.minY) < 0.01
+                     && abs(plate.height - body.height) < 0.01
+                     && abs(plate.maxY - body.maxY) < 0.01
+                     && abs(plate.minX - noticeBody.minX) < 0.01
+                     && abs(plate.width - noticeBody.width) < 0.01
+                     && plate.width > frost.width,
+                     "a notice plate matches the pill's top and bottom and is wider than the frost rim")
+        let open = CGSize(width: resting.width + 200, height: 420)
+        suite.expect(!NotchLayout.hardwareWingsClear(surface: open, resting: resting),
+                     "an open page is not a pair of clear wings")
+        let classic = NotchGeometry(screen: screen, safeAreaTop: 32, cameraWidth: 185, menuBarHeight: 39)
+        suite.expect(!classic.isHardwareCapsule && classic.noticeShift(wings) == (wings.trailing - wings.leading) / 2,
+                     "a hanging notch keeps its own wing shift")
     }
 
     /// The capsule is centred in the bar with the same margin above and

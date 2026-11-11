@@ -456,7 +456,7 @@ final class NotchService: ObservableObject {
             // from the menus, it draws no activity, so it keeps waiting for
             // the pointer to reach its place.
             && !(NotchSupport.hiddenShowsActivity() && (notice != nil
-                || compactActivity != nil && (geometry.isNotched || geometry.compactSideRoom != nil)))
+                || compactActivity != nil && (geometry.coversHardwareCutout || geometry.compactSideRoom != nil)))
     }
 
     /// Full screen keeps a clickable black cutout until the user opens it.
@@ -467,7 +467,7 @@ final class NotchService: ObservableObject {
     /// A simulated cutout covers no camera, so in full screen it stays out
     /// of the picture until the configured hover or a shortcut opens it.
     private var hiddenAtRestInFullscreen: Bool {
-        fullscreenCompact && !geometry.isNotched
+        fullscreenCompact && !geometry.coversHardwareCutout
     }
 
     /// Full-screen hover is opt-in independently of the opening mode used
@@ -995,10 +995,36 @@ final class NotchService: ObservableObject {
         return hoverEmphasized ? NotchHoverEmphasis.size(from: resting, geometry: geometry) : resting
     }
 
+    /// Hover and a closed notice leave the canvas clear around the pill, so
+    /// the camera stays covered by black alone. Hover then draws a thin frost.
+    /// A notice draws its own plate. A compact activity keeps the fill behind
+    /// its row: that row is the capsule.
+    private var hardwareWingsAreClear: Bool {
+        guard geometry.isHardwareCapsule, !fullscreenCompact, captureControls == nil,
+              !expanded, !dragPlaceholder, !peeking, !noticeExpanded else { return false }
+        if notice != nil { return true }
+        return hoverEmphasized && compactActivity == nil
+    }
+
+    /// A closed hardware notice paints a black plate of its own. Hover keeps
+    /// the thin frost and does not share this plate.
+    private var hardwareNoticePlate: Bool {
+        guard geometry.isHardwareCapsule, !fullscreenCompact, captureControls == nil,
+              !expanded, !dragPlaceholder, !peeking, !noticeExpanded else { return false }
+        return notice != nil
+    }
+
     /// How far the island's centre sits right of the camera's. Only a closed
     /// notice beside a camera, or the music strip naming its song, reaches
-    /// further toward its wider side. A capsule runs its strips end to end.
+    /// further toward its wider side. A simulated capsule runs its strips
+    /// end to end and stays centred. A hardware capsule's notice uses the
+    /// same wings, clear of the pill.
     var surfaceShift: CGFloat {
+        if geometry.isHardwareCapsule {
+            guard !fullscreenCompact, captureControls == nil, !expanded, !dragPlaceholder, !peeking,
+                  let notice, !noticeExpanded else { return 0 }
+            return geometry.noticeShift(notice.wings(in: geometry))
+        }
         guard !geometry.floats, !fullscreenCompact, captureControls == nil, !expanded, !dragPlaceholder else { return 0 }
         if let notice { return noticeExpanded ? 0 : geometry.noticeShift(notice.wings(in: geometry)) }
         return namedMusicWings.map { ($0.trailing - $0.leading) / 2 } ?? 0
@@ -1018,12 +1044,22 @@ final class NotchService: ObservableObject {
     private var capsuleSurfaceSize: CGSize? {
         guard geometry.floats, !fullscreenCompact, !expanded, !dragPlaceholder else { return nil }
         if captureControls != nil { return captureControlsCollapsed ? NotchCapsuleLayout.captureSurface(geometry: geometry) : nil }
-        if let notice { return noticeExpanded ? nil : capsuleNoticeSize(notice) }
+        // A hardware notice keeps a wing on each side of the pill, as a notch
+        // does. The wings are drawn clear; the pill stays black.
+        if let notice {
+            if geometry.isHardwareCapsule, !noticeExpanded {
+                return geometry.hardwareNoticeSize(wings: notice.wings(in: geometry))
+            }
+            return noticeExpanded ? nil : capsuleNoticeSize(notice)
+        }
         if peeking || showsCompactActivityPicker { return nil }
         // At rest the charge or the allowance fits inside the bare capsule.
+        // A hardware capsule's hover reach grows both ways from the bare pill.
+        // An activity keeps the centred strip it already has.
         let resting = compactActivity.map { capsuleStripSize(for: $0, companion: compactCompanion) }
             ?? geometry.restingSize(showsContent: false)
-        return hoverEmphasized ? NotchHoverEmphasis.size(from: resting, geometry: geometry) : resting
+        let ear = geometry.isHardwareCapsule && compactActivity == nil
+        return hoverEmphasized ? NotchHoverEmphasis.size(from: resting, geometry: geometry, leading: ear) : resting
     }
 
     /// The last banner's capsule. A banner replacing it keeps at least its
@@ -1590,8 +1626,12 @@ final class NotchService: ObservableObject {
         // The activity picker replaces that opening and keeps its hover response.
         let opensOnHover = hoverOpeningEnabled
             && UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands) && !showsCompactActivityPicker
+        // A hardware capsule still grows its ear when hover will open the
+        // page. The system island covers a centred opening, and the ear is
+        // the part the pointer can land on until the page arrives.
         let emphasize = inside && !hiddenInFullscreen && !hiddenUntilHover && !expanded && !peeking && !dragPlaceholder
-            && notice == nil && captureControls == nil && !opensOnHover
+            && notice == nil && captureControls == nil
+            && (!opensOnHover || geometry.isHardwareCapsule)
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if hoverEmphasized != emphasize || showedPicker != showsCompactActivityPicker || unnamesMusic {
             hoverEmphasized = emphasize
@@ -2705,7 +2745,7 @@ final class NotchService: ObservableObject {
             return
         }
         let open = expanded || peeking || notice != nil || dragPlaceholder || captureControls != nil
-        guard open || (!hiddenAtRestInFullscreen && (geometry.isNotched || geometry.compactSideRoom != nil)) else {
+        guard open || (!hiddenAtRestInFullscreen && (geometry.coversHardwareCutout || geometry.compactSideRoom != nil)) else {
             finishMusicDeparture()
             presentedMusic = nil
             if heldMusic != nil { heldMusic = nil }
@@ -2718,7 +2758,7 @@ final class NotchService: ObservableObject {
         let contentTransition = compactMusicTransition(transitionContent, animated: animated)
         if captureControls == nil {
             // A simulated cutout yields to the menu bar when it reappears in full screen.
-            panel?.level = hiddenInFullscreen && !geometry.isNotched && !NotchSupport.coversMenus()
+            panel?.level = hiddenInFullscreen && !geometry.coversHardwareCutout && !NotchSupport.coversMenus()
                 ? NotchPanel.fullscreenLevel : NotchPanel.normalLevel
         }
         // Preferences can change computed dimensions without publishing a
@@ -2747,7 +2787,9 @@ final class NotchService: ObservableObject {
                                     || UserDefaults.standard.bool(forKey: DefaultsKey.notchHideUntilHover)
                                     && UserDefaults.standard.bool(forKey: DefaultsKey.notchOpenOnHover)),
                             usesGlass: !fullscreenCompact && usesGlassSurface,
-                            steady: fitsInPlace)
+                            steady: fitsInPlace,
+                            clearHardwareWings: hardwareWingsAreClear,
+                            hardwareNoticePlate: hardwareNoticePlate)
         // The selector lives in a separate full-screen panel. A floating
         // capsule may sit below the display edge, so publish the island's
         // actual bottom inset as the controls collapse or reopen.
@@ -3232,7 +3274,7 @@ final class NotchService: ObservableObject {
                 var geometry = baseGeometry(for: screen)
                 geometry.compactSideRoom = mirrorSideRoom(on: screen, geometry: geometry)
                 // A simulated island needs the menus' room at rest, as the island does.
-                if geometry.isNotched || geometry.compactSideRoom != nil {
+                if geometry.coversHardwareCutout || geometry.compactSideRoom != nil {
                     // Keep the arriving copy only while it may still show.
                     // Fullscreen and hide-until-hover must also hide a held copy.
                     if id == mirrorHeldForArrival { continue }
@@ -3364,7 +3406,7 @@ final class NotchService: ObservableObject {
               !dragPlaceholder, !heldDrag, let panel, panel.isVisible, !panel.ignoresMouseEvents else { return nil }
         let geometry = compactActivityIsVisible ? compactActivityGeometry : self.geometry
         // A notice can be visible even when a menu occupies the simulated cutout.
-        guard geometry.isNotched || geometry.compactSideRoom != nil else { return nil }
+        guard geometry.coversHardwareCutout || geometry.compactSideRoom != nil else { return nil }
         var size = surfaceSize
         if geometry.floats { size.width = min(size.width, NotchCapsuleLayout.availableWidth(geometry)) }
         // The menu bar still gets these clicks, so beside a camera a notice

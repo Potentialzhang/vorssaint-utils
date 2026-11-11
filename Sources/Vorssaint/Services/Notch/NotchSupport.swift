@@ -113,7 +113,8 @@ enum NotchDisplay: String, CaseIterable {
 
 /// How the island meets the top of a display without a camera housing: a
 /// capsule floating in the menu bar, as on the phone, or a cutout hanging
-/// from the top edge. A physical camera always keeps the cutout it covers.
+/// from the top edge. A wide physical camera keeps the cutout it covers.
+/// A short one is a capsule housing, classified separately.
 enum NotchSilhouette: String, CaseIterable {
     case capsule, notch
 
@@ -405,6 +406,14 @@ enum NotchLayout {
     /// activity's wings, closer to the phone's proportions.
     static let capsuleRestingAspect: CGFloat = 5
 
+    /// The black capsule inside a hardware safe area. Measured on a PROLED
+    /// display whose reported camera band is 59 by 40 and flush with the
+    /// screen edge: the black capsule starts 8.5 points down and stays half
+    /// a point inside the band on the other three sides. The band's top is
+    /// menu bar. Painting it joins the capsule to the bezel.
+    static let hardwareCapsuleTopInset: CGFloat = 8.5
+    static let hardwareCapsuleEdgeInset: CGFloat = 0.5
+
     /// The capsule of a surface `rect` in size: `gap` inside its top and
     /// bottom, and as wide as the hanging island's body between its
     /// shoulders, which content and floating controls are laid out around.
@@ -423,11 +432,76 @@ enum NotchLayout {
         return CGSize(width: body.width + shoulder(height: height) * 2, height: max(0, height))
     }
 
+    /// The clear shoulder beside the black pill. A taller surface flares a
+    /// wider shoulder; the black pill itself stays the resting capsule.
+    static func hardwareSideInset(width: CGFloat, height: CGFloat) -> CGFloat {
+        min(shoulder(height: height) + hardwareCapsuleEdgeInset, max(0, width) / 2)
+    }
+
+    /// A closed hardware capsule that has grown past its pill keeps the canvas
+    /// clear around the pill. Hover paints a thin frost there. A notice paints
+    /// its own plate. An open page is much taller than the hover lip and keeps
+    /// its own fill.
+    static func hardwareWingsClear(surface: CGSize, resting: CGSize) -> Bool {
+        let grown = surface.width > resting.width + 0.5 || surface.height > resting.height + 0.5
+        return grown && surface.height <= resting.height + NotchHoverEmphasis.hardwareDrop + 1
+    }
+
+    /// The drawn hardware capsule: the system pill, not the safe-area band.
+    static func hardwareCapsuleBody(in rect: CGRect, topInset: CGFloat = hardwareCapsuleTopInset) -> CGRect {
+        let width = max(0, rect.width), height = max(0, rect.height)
+        let side = hardwareSideInset(width: width, height: height)
+        let top = min(max(0, topInset), height)
+        let bottom = min(max(0, hardwareCapsuleEdgeInset), max(0, height - top))
+        return CGRect(x: rect.minX + side, y: rect.minY + top,
+                      width: max(0, width - side * 2), height: max(0, height - top - bottom))
+    }
+
+    /// How far the faint frost sticks out past the black pill, on each side.
+    /// The reach that catches the pointer is wider; this is only the glass.
+    static let hardwareFrostLip: CGFloat = 2
+    /// The frost's top sits this far above the pill. One point is two pixels
+    /// on a 2x display. Its bottom stays on the pill's bottom.
+    static let hardwareFrostTopLift: CGFloat = 1
+
+    /// A thin rim around the black pill: a little wider, a point higher, and
+    /// the same bottom. Hover only. A notice has its own plate.
+    static func hardwareFrostBody(around body: CGRect) -> CGRect {
+        CGRect(x: body.minX - hardwareFrostLip,
+               y: body.minY - hardwareFrostTopLift,
+               width: body.width + hardwareFrostLip * 2,
+               height: body.height + hardwareFrostTopLift)
+    }
+
+    /// The notice's own plate. Top and bottom stay on the black pill, so the
+    /// row meets the capsule. Width is the notice body, not the frost rim.
+    static func hardwareNoticePlate(noticeBody: CGRect, pillBody: CGRect) -> CGRect {
+        CGRect(x: noticeBody.minX, y: pillBody.minY,
+               width: max(0, noticeBody.width), height: max(0, pillBody.height))
+    }
+
+    /// How far words in the full safe-area strip must drop to sit in the pill.
+    /// The strip is centred on the band; the pill starts lower, so an unshifted
+    /// row crosses the pill's top.
+    static var hardwareCapsuleContentDrop: CGFloat {
+        (hardwareCapsuleTopInset - hardwareCapsuleEdgeInset) / 2
+    }
+
     /// The capsule outline. Every size, down to a line, has the same elements,
     /// so any two frames of a resize blend, and circular corners make a
     /// strip's ends true half circles that its content can be measured from.
     static func capsulePath(in rect: CGRect, gap: CGFloat) -> CGPath {
-        let body = capsuleBody(in: rect, gap: gap)
+        path(for: capsuleBody(in: rect, gap: gap))
+    }
+
+    static func hardwareCapsulePath(in rect: CGRect, topInset: CGFloat = hardwareCapsuleTopInset) -> CGPath {
+        path(for: hardwareCapsuleBody(in: rect, topInset: topInset))
+    }
+
+    /// A stadium through `body` itself, with no further inset.
+    static func stadiumPath(for body: CGRect) -> CGPath { path(for: body) }
+
+    private static func path(for body: CGRect) -> CGPath {
         let corner = min(capsuleRadius(height: body.height), body.width / 2)
         let handle = corner * (1 - 0.55228475)
         let (left, right, top, bottom) = (body.minX, body.maxX, body.minY, body.maxY)
@@ -729,15 +803,40 @@ struct NotchHoverState {
 }
 
 enum NotchHoverEmphasis {
+    /// How far a hardware capsule's hover reach grows on each side. The black
+    /// pill does not follow it: the extra is clear, so it does not paint over
+    /// the menu bar, and the pointer can still land beside the system island.
+    static let hardwareReach: CGFloat = 64
+    /// How far that reach drops below the resting pill.
+    static let hardwareDrop: CGFloat = 8
+
     /// `reach` is how much further than half the width one side goes, as a
-    /// strip naming its song does on its cover's side.
-    static func size(from resting: CGSize, geometry: NotchGeometry, reach: CGFloat = 0) -> CGSize {
+    /// strip naming its song does on its cover's side. `leading` is the
+    /// hardware capsule's clear reach: both sides, and a little below the bar.
+    static func size(from resting: CGSize, geometry: NotchGeometry, reach: CGFloat = 0,
+                     leading: Bool = false) -> CGSize {
+        if leading { return hardwareReachSize(from: resting, geometry: geometry) }
         // Keep the pulse inside the measured free menu-bar space on each side.
         let occupiedWing = max(0, (resting.width - geometry.cameraWidth) / 2) + reach
         let freeSide = max(0, (geometry.compactSideRoom ?? 0) - occupiedWing)
         let growth = min(10, freeSide)
         // A capsule stretches along the bar and stays inside it.
         return CGSize(width: resting.width + growth * 2, height: resting.height + (geometry.floats ? 0 : 5))
+    }
+
+    /// Both sides, by the same amount, so the pill stays centred on the camera.
+    /// A crowded bar adds no width, but the lip still drops. An unmeasured bar
+    /// does not swallow the reach.
+    private static func hardwareReachSize(from base: CGSize, geometry: NotchGeometry) -> CGSize {
+        let free: CGFloat
+        if let room = geometry.compactSideRoom, room.isFinite {
+            let occupied = max(0, (base.width - geometry.cameraWidth) / 2)
+            free = max(0, room - occupied)
+        } else {
+            free = hardwareReach
+        }
+        let growth = min(hardwareReach, free).rounded(.down)
+        return CGSize(width: base.width + growth * 2, height: base.height + hardwareDrop)
     }
 }
 
@@ -2239,6 +2338,27 @@ struct NotchNoticeWings: Equatable {
     var widest: CGFloat { max(leading, trailing) }
 }
 
+/// What sits at the top of a display. A classic notch is several times
+/// wider than it is tall. The PROLED camera housing is a short capsule
+/// (measured 59 by 40 points), and the hanging notch drawn over it splits
+/// every page around a hole the width of that capsule.
+enum NotchHousing: Equatable {
+    case none, notch, capsule
+
+    /// Width divided by height. A classic notch stays a notch down through
+    /// the tallest safe area the layout uses with a wide camera (210 by 64,
+    /// about 3.3, and a short menu bar's scaled notch, 90 by 16, still
+    /// about 5.6). The PROLED housing is about 1.5 (59 by 40). The boundary
+    /// sits between those, so a wide camera with a tall safe area still
+    /// wraps its page and a short housing becomes the flush capsule.
+    static let notchAspect: CGFloat = 2.5
+
+    static func classify(safeAreaTop: CGFloat, cameraWidth: CGFloat) -> NotchHousing {
+        guard safeAreaTop.isFinite, safeAreaTop > 0, cameraWidth.isFinite, cameraWidth > 0 else { return .none }
+        return cameraWidth / safeAreaTop >= notchAspect ? .notch : .capsule
+    }
+}
+
 struct NotchGeometry: Equatable {
     let screen: CGRect
     /// How far the island's centre sits right of the camera's: a closed
@@ -2249,6 +2369,11 @@ struct NotchGeometry: Equatable {
     /// manual fit and outline clearance, rather than just the hardware inset.
     let cameraHeight: CGFloat
     let isNotched: Bool
+    /// A physical camera housing short enough to be a pill. The island covers
+    /// it with the capsule, flush with the top of the display, instead of
+    /// hanging a wide notch over it. `floats` is true so closed strips run
+    /// from end to end; open pages still start below the cutout.
+    let isHardwareCapsule: Bool
     let layout: NotchSize
     let customWidth: CGFloat
     let customHeight: CGFloat
@@ -2293,16 +2418,23 @@ struct NotchGeometry: Equatable {
         self.customWidth = NotchSize.clamped(customWidth, to: NotchSize.widthRange, fallback: NotchSize.defaultWidth)
         self.customHeight = NotchSize.clamped(customHeight, to: NotchSize.heightRange, fallback: NotchSize.defaultHeight)
         let barHeight = menuBarHeight.isFinite ? min(64, max(16, menuBarHeight)) : 24
-        isNotched = safeAreaTop.isFinite && safeAreaTop > 0 && cameraWidth.isFinite && cameraWidth > 0
+        let housing = NotchHousing.classify(safeAreaTop: safeAreaTop, cameraWidth: cameraWidth)
+        isNotched = housing == .notch
+        isHardwareCapsule = housing == .capsule
         // Only a physical camera has an outline to match; a simulated one follows the bar.
-        let fit = isNotched ? cameraFit : .zero
+        let fit = housing == .none ? NotchCameraFit.zero : cameraFit
         // A capsule replaces only a simulated cutout. It is as wide as the
         // cutout of the bar it sits in with its usual margins, so a bar hidden
         // on one display and shown on another draws the same capsule on both.
-        let gap: CGFloat? = !isNotched && silhouette == .capsule ? NotchLayout.capsuleGap(barHeight: barHeight) : nil
+        // A hardware capsule is still a pill (`floatingGap` non-nil) but the
+        // gap is not a margin: the safe area runs to the screen edge, and the
+        // black capsule inside it is inset by `hardwareCapsuleBody`.
+        let gap: CGFloat? = isHardwareCapsule ? 0
+            : !isNotched && silhouette == .capsule ? NotchLayout.capsuleGap(barHeight: barHeight) : nil
         floatingGap = gap
         // A fitted capsule grows from its top edge, keeping its margins.
-        let capsuleFit = gap == nil ? NotchCapsuleFit.zero : capsuleFit
+        // The hardware pill ignores that fit: shrinking it would uncover the cutout.
+        let capsuleFit = gap == nil || isHardwareCapsule ? NotchCapsuleFit.zero : capsuleFit
         floatingDrop = capsuleFit.drop
         capsuleWidthFit = capsuleFit.width
         // The bar ends in a hairline, `barEdge` thick, that reads as its edge:
@@ -2317,15 +2449,17 @@ struct NotchGeometry: Equatable {
         // A capsule's camera is only the room it keeps, on whole points.
         let simulated = 180 * profileHeight / 32
         // A simulated cutout sits on the menu bar, where its outline already shows.
-        let room = isNotched && outline ? NotchLayout.outlineWidth : 0
+        let room = housing != .none && outline ? NotchLayout.outlineWidth : 0
         outlineRoom = room
-        self.cameraWidth = min(isNotched ? max(0, cameraWidth + fit.width + room * 2)
+        self.cameraWidth = min(housing != .none ? max(0, cameraWidth + fit.width + room * 2)
                                : gap == nil ? simulated : (simulated + capsuleFit.width).rounded(),
                                screen.width * 0.7)
-        if isNotched {
-            // The menu bar can extend slightly below the camera's safe area.
-            // Optionally cover its full height before applying a manual fit.
-            let baseHeight = hideMenuBarGap ? max(safeAreaTop, barHeight) : safeAreaTop
+        if housing != .none {
+            // The menu bar can extend below the camera's safe area. A wide
+            // notch covers that band only when asked. A hardware capsule does
+            // not: its closed pill is the cutout, and painting the bar below
+            // the housing draws a taller capsule than the one in the screen.
+            let baseHeight = !isHardwareCapsule && hideMenuBarGap ? max(safeAreaTop, barHeight) : safeAreaTop
             cameraHeight = min(max(0, baseHeight + fit.height + room), 64)
         } else {
             cameraHeight = stripHeight
@@ -2335,16 +2469,25 @@ struct NotchGeometry: Equatable {
     }
 
     /// The island floats in the menu bar instead of hanging from the top edge.
+    /// A hardware capsule does too: its closed strips are capsules. Its open
+    /// pages still clear the cutout, which `safeContentTop` accounts for.
     var floats: Bool { floatingGap != nil }
+
+    /// A real cutout the island covers without waiting to measure the menus.
+    var coversHardwareCutout: Bool { isNotched || isHardwareCapsule }
 
     func hasSameMenuBar(as other: NotchGeometry) -> Bool {
         screen == other.screen && cameraWidth == other.cameraWidth
             && menuBarHeight == other.menuBarHeight && isNotched == other.isNotched
+            && isHardwareCapsule == other.isHardwareCapsule
     }
 
-    /// Below a camera, or below the space it would take. A capsule has
-    /// neither, so what it shows keeps even margins inside it.
-    var safeContentTop: CGFloat { floats ? NotchLayout.bottomInset : cameraHeight + 10 }
+    /// Below a camera, or below the space it would take. A capsule with no
+    /// camera keeps even margins inside it. A hardware capsule has a cutout
+    /// flush with the top, so its pages start below that, as a notch's do.
+    var safeContentTop: CGFloat {
+        floats && !isHardwareCapsule ? NotchLayout.bottomInset : cameraHeight + 10
+    }
     /// The top row wraps the camera, a page's own controls on either side,
     /// when each side keeps its wing: 100 points, which the compact preset
     /// leaves, or the player's cover. Narrower layouts keep a full row below
@@ -2376,7 +2519,9 @@ struct NotchGeometry: Equatable {
     /// buttons as far from the top edge as the page is from the bottom. A
     /// page with no row starts as far from the top as it ends from the bottom.
     var headerTopInset: CGFloat {
-        if isNotched, !floats { return headerCameraGap > 0 ? 0 : safeContentTop }
+        // A hardware capsule cannot wrap its cutout: the cutout is a pill,
+        // not a wide notch, and a row split around it is the broken layout.
+        if isHardwareCapsule || (isNotched && !floats) { return headerCameraGap > 0 ? 0 : safeContentTop }
         guard headerRowHeight > 0 else { return NotchLayout.bottomInset }
         return floats ? NotchLayout.bottomInset - (NotchLayout.headerHeight - 28) / 2 : 0
     }
@@ -2427,6 +2572,7 @@ struct NotchGeometry: Equatable {
     }
     func restingSize(showsContent: Bool) -> CGSize {
         if showsContent { return collapsed }
+        if isHardwareCapsule { return hardwareCapsuleRestingSize }
         // Bare, a capsule is shorter than the gap between an activity's
         // wings, closer to the phone's proportions, and on whole points,
         // as the window around it is.
@@ -2434,6 +2580,16 @@ struct NotchGeometry: Equatable {
         let shoulders = NotchLayout.shoulder(height: stripHeight) * 2
         let capsule = max(NotchLayout.capsuleRestingAspect * stripBodyHeight + capsuleWidthFit, stripBodyHeight * 2)
         return CGSize(width: min(cameraWidth, (capsule + shoulders).rounded()), height: cameraHeight)
+    }
+
+    /// The closed pill with nothing in it. The drawn body is this surface
+    /// minus the shoulders `capsuleBody` insets, and that body is the cutout.
+    /// A wider or taller pill is a second capsule around the one in the
+    /// screen. A notice grows from here on both sides, and those wings are
+    /// clear. Menus cannot narrow the cover, or the housing shows.
+    private var hardwareCapsuleRestingSize: CGSize {
+        let shoulders = NotchLayout.shoulder(height: stripHeight) * 2
+        return CGSize(width: (cameraWidth + shoulders).rounded(.up), height: cameraHeight)
     }
     /// Full screen and the Lock Screen remove outline clearance while keeping
     /// the chosen menu-bar coverage and manual fit.
@@ -2828,6 +2984,14 @@ struct NotchGeometry: Equatable {
                height: max(0, size.height - headerTopInset - headerChromeHeight))
     }
     var appPanelSize: CGSize { contentSize(for: expandedSize(module: .tools, panel: true)) }
+    /// A hardware notice keeps the wing layout, and never a window narrower
+    /// than the pill, or the cutout shows past the camera gap.
+    func hardwareNoticeSize(wings: NotchNoticeWings) -> CGSize {
+        let spanned = noticeSize(wings: wings)
+        let resting = restingSize(showsContent: false)
+        return CGSize(width: max(spanned.width, resting.width), height: resting.height)
+    }
+
     func frame(for size: CGSize) -> CGRect {
         CGRect(x: screen.midX + surfaceShift - size.width / 2,
                y: screen.maxY - floatingDrop - size.height,

@@ -141,7 +141,9 @@ enum NotchPresentationRefreshContract {
         }
         func present(size: CGSize, geometry: NotchGeometry, animated: Bool,
                      transitionContent: NotchContentTransition, quickAccess: NotchQuickAccessConfiguration?,
-                     revealFromHidden: Bool, usesGlass: Bool, steady: Bool) {
+                     revealFromHidden: Bool, usesGlass: Bool, steady: Bool,
+                     clearHardwareWings: Bool = false,
+                     hardwareNoticePlate: Bool = false) {
             transitions.append(transitionContent)
             self.steady = steady
             departsContent = transitionContent == .depart && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -210,6 +212,7 @@ enum NotchPresentationRefreshContract {
         var selectedMetric: Bool?
         var expanded = true
         var peeking = false, dragPlaceholder = false, compactActivityIsVisible = false
+        var hoverEmphasized = false
         var compactActivityOverride: NotchCompactActivity?
         var compactActivity: NotchCompactActivity? {
             get { compactActivityOverride ?? (compactActivityIsVisible ? .timer : nil) }

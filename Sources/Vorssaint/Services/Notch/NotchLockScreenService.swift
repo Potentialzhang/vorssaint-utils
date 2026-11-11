@@ -85,10 +85,17 @@ final class NotchLockScreenService {
         }
         // The island's own reading of its camera, with the fit the person set.
         let geometry = NotchService.shared.geometry
-        if geometry.isNotched, NSScreen.screens.contains(where: { $0.frame == geometry.screen && $0.safeAreaInsets.top > 0 }) {
+        if geometry.coversHardwareCutout, NSScreen.screens.contains(where: { $0.frame == geometry.screen && $0.safeAreaInsets.top > 0 }) {
+            // A capsule housing has no wings of its own. The padlock sits in
+            // the pill's extra width, and the pill stays at least as wide as
+            // the cutout it covers.
+            let wing = geometry.isHardwareCapsule
+                ? max(1, (geometry.restingSize(showsContent: false).width - geometry.cameraWidth) / 2)
+                : geometry.lockScreenMusicGeometry.compactActivityWingWidth
+            let cameraWidth = geometry.isHardwareCapsule ? geometry.cameraWidth : geometry.bareCutout.width
             let surface = NotchLockScreenLayout.islandSurface(
-                in: geometry.screen, cameraWidth: geometry.bareCutout.width, cameraHeight: geometry.bareCutout.height,
-                wing: geometry.lockScreenMusicGeometry.compactActivityWingWidth)
+                in: geometry.screen, cameraWidth: cameraWidth, cameraHeight: geometry.bareCutout.height,
+                wing: wing)
             frames.islandSurface = surface
             frames.island = surface.map(NotchLockScreenLayout.islandFrame(around:))
         }

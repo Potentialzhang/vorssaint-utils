@@ -140,24 +140,27 @@ struct NotchView: View {
                     service.activateNotice(notice)
                 } label: {
                     Group {
-                        if floats {
+                        if floats && !service.geometry.isHardwareCapsule {
                             // A departing notice keeps its own row while the capsule closes.
                             NotchCapsuleNoticeView(notice: notice, geometry: service.geometry,
                                                    size: service.notice == nil ? service.capsuleNoticeSurface(notice)
                                                        : service.surfaceSize)
                         } else {
+                            // A hardware capsule puts the words on both sides of
+                            // the pill. The wings are a light frost.
                             NotchNoticeView(notice: notice, geometry: service.geometry, hidesMascot: service.mascotBridging)
                         }
                     }
                     // Beside a camera the notice reaches further toward its
                     // wider side, and takes clicks all the way to its end.
-                    .contentShape(Rectangle().offset(x: floats ? 0
+                    .contentShape(Rectangle().offset(x: floats && !service.geometry.isHardwareCapsule ? 0
                         : service.geometry.noticeShift(notice.wings(in: service.geometry))))
                 }
                 // A floating capsule lights up under the pointer. Beside a
                 // camera the wash would outline the housing, so the notch keeps
                 // its notices plain, as its other strips are.
-                .buttonStyle(NotchButtonStyle(cornerRadius: 14, lifts: false, highlights: floats))
+                .buttonStyle(NotchButtonStyle(cornerRadius: 14, lifts: false,
+                                              highlights: floats && !service.geometry.isHardwareCapsule))
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(notice.accessibilityText)
                 .accessibilityAddTraits(.isButton)
@@ -779,6 +782,13 @@ struct NotchShape: Shape {
     /// A capsule floating this far inside the top and bottom of the rect,
     /// with its own corners, instead of the outline hanging from the edge.
     var floatingGap: CGFloat? = nil
+    /// The safe area reaches the screen edge. The drawn pill is the smaller
+    /// capsule inside it, so its top stays off the bezel.
+    var hardwareCapsule = false
+    /// Top inset of a hardware capsule. The resting pill uses the measured
+    /// gap; a wing's mask sits a point higher so the frost above the pill
+    /// is not clipped.
+    var hardwareTopInset: CGFloat = NotchLayout.hardwareCapsuleTopInset
     var animatableData: CGFloat {
         get { radius }
         set { radius = newValue }
@@ -786,11 +796,13 @@ struct NotchShape: Shape {
 
     /// The island's outline at a surface of `height`, as its display draws it.
     static func island(height: CGFloat, geometry: NotchGeometry) -> NotchShape {
-        NotchShape(attached: true, radius: NotchLayout.surfaceRadius(height: height), floatingGap: geometry.floatingGap)
+        NotchShape(attached: true, radius: NotchLayout.surfaceRadius(height: height),
+                   floatingGap: geometry.floatingGap, hardwareCapsule: geometry.isHardwareCapsule)
     }
 
     func path(in rect: CGRect) -> Path {
         guard attached else { return Path(roundedRect: rect, cornerRadius: radius) }
+        if hardwareCapsule { return Path(NotchLayout.hardwareCapsulePath(in: rect, topInset: hardwareTopInset)) }
         if let floatingGap { return Path(NotchLayout.capsulePath(in: rect, gap: floatingGap)) }
         let shoulder = NotchLayout.shoulder(height: rect.height)
         let bottom = min(radius, rect.height / 2, (rect.width - shoulder * 2) / 2)

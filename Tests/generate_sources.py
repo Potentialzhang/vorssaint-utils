@@ -1677,6 +1677,8 @@ def main():
           + declaration(notch, "    private func compactMusicTransition(").replace("private func", "func", 1)
           + declaration(notch, "    private func rememberPresentedMusic(").replace("private func", "func", 1)
           + declaration(notch, "    private func switchCompactSelection(").replace("private func", "func", 1)
+          + declaration(notch, "    private var hardwareWingsAreClear:").replace("private var", "var", 1)
+          + declaration(notch, "    private var hardwareNoticePlate:").replace("private var", "var", 1)
           + declaration(notch, "    func refreshPresentation(")
               .replace("NotchSupport.coversMenus()", "UserDefaults.standard.coversMenus")
           + declaration(notch, "    private func applyMenuSpace(").replace("private func", "func", 1)

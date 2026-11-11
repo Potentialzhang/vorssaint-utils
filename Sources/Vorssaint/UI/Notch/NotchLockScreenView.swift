@@ -50,7 +50,7 @@ struct NotchLockScreenIsland: View {
         let wing = max(0, (size.width - cameraWidth) / 2)
         let padlockSide = min(geometry.compactMusicArtworkSide, wing)
         let playing = model.showsMusic(music.playback) && music.playback?.isPlaying == true
-        NotchShape(attached: true, radius: NotchLayout.surfaceRadius(height: size.height))
+        NotchShape.island(height: size.height, geometry: geometry)
             .fill(.black)
             .overlay {
                 HStack(spacing: 0) {

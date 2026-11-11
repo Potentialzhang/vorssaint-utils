@@ -144,12 +144,18 @@ struct NotchLayoutEditor: View {
     /// floats in its display's menu bar, with the sections button in its
     /// row when nothing floats for it.
     private var previewGeometry: NotchGeometry {
-        let floats = notch.geometry.floats
-        let geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1920, height: 1080),
-                                     safeAreaTop: floats ? 0 : 32,
-                                     cameraWidth: floats ? 0 : 210, layout: layout,
-                                     menuBarHeight: floats ? notch.geometry.menuBarHeight : 24,
-                                     customWidth: width, customHeight: height, silhouette: floats ? .capsule : .notch)
+        let live = notch.geometry
+        // A hardware capsule keeps its own cutout in the preview. Treating it
+        // as a menu-bar capsule with no camera draws the page through the hole.
+        let geometry = live.isHardwareCapsule
+            ? NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+                            safeAreaTop: live.cameraHeight, cameraWidth: max(1, live.cameraWidth), layout: layout,
+                            menuBarHeight: live.menuBarHeight, customWidth: width, customHeight: height)
+            : NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+                            safeAreaTop: live.floats ? 0 : 32,
+                            cameraWidth: live.floats ? 0 : 210, layout: layout,
+                            menuBarHeight: live.floats ? live.menuBarHeight : 24,
+                            customWidth: width, customHeight: height, silhouette: live.floats ? .capsule : .notch)
         return geometry.page(.controls, controls: NotchSupport.controls(),
                              sectionsButton: !configuration.actions.contains(.explore))
     }
