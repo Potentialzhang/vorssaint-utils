@@ -537,6 +537,84 @@ enum NotchPresentationProbe {
         Mode.allCases.contains { arguments.contains($0.rawValue) }
     }
 
+    private static func checkHardwareAgentTransitions(screen: NSScreen) -> [String] {
+        let geometry = NotchGeometry(screen: screen.frame, safeAreaTop: 40, cameraWidth: 59, menuBarHeight: 45,
+                                     compactSideRoom: 150, cameraFit: NotchCameraFit(width: 1, height: 0.5),
+                                     noticeEdges: NotchNoticeEdgeFit(up: 2.5, down: 5))
+        let resting = geometry.restingSize(showsContent: false)
+        let activity = NotchCapsuleLayout.agentSurface(reading: "1:00:00", working: 1, geometry: geometry)
+        let completed = NotchNotice(event: .agents, title: "Codex finished", detail: "1h", symbol: "sparkles")
+        let wings = completed.wings(in: geometry)
+        let notice = geometry.hardwareNoticeSize(wings: wings)
+        var shifted = geometry
+        shifted.surfaceShift = geometry.noticeShift(wings)
+
+        // With the foreground empty, any wide black here would also show
+        // when an outgoing row is gone or an incoming notice is still hidden.
+        let host = NotchWindowHost(content: AnyView(Color.clear), geometry: geometry, size: resting, background: surface)
+        defer { host.close() }
+        host.panel.alphaValue = 0
+        host.panel.ignoresMouseEvents = true
+        host.panel.orderFrontRegardless()
+        var failures: [String] = []
+
+        func checkFit(_ phase: String, geometry: NotchGeometry, size: CGSize) {
+            let expected = NotchLayout.hardwareNoticePath(in: CGRect(origin: .zero, size: size),
+                                                          pillHeight: geometry.stripHeight,
+                                                          edges: geometry.noticeEdges).boundingBoxOfPath
+            guard let shown = host.silhouetteProbePath?.boundingBoxOfPath,
+                  abs(shown.minY - expected.minY) <= 0.5, abs(shown.maxY - expected.maxY) <= 0.5,
+                  abs(shown.width - expected.width) <= 0.5, host.panel.frame.height >= shown.maxY - 0.5 else {
+                failures.append("hardware agent \(phase) clipped or misaligned its fitted edges")
+                return
+            }
+        }
+
+        func sample(_ phase: String, for duration: TimeInterval = 0.55) {
+            let deadline = Date().addingTimeInterval(duration)
+            var width = host.backdropProbeBlackWidth
+            repeat {
+                RunLoop.current.run(until: min(deadline, Date().addingTimeInterval(0.008)))
+                width = max(width, host.backdropProbeBlackWidth)
+            } while Date() < deadline
+            if width > NotchLayout.hardwareSystemPill.width + 0.5 {
+                failures.append("hardware agent \(phase) exposed an empty \(width) pt black plate")
+            }
+        }
+
+        var topOnly = geometry
+        topOnly.noticeEdges = NotchNoticeEdgeFit(up: 4, down: 5)
+        host.present(size: activity, geometry: geometry, animated: false, clearHardwareWings: true, hardwareNoticePlate: .content)
+        host.present(size: activity, geometry: topOnly, animated: true, clearHardwareWings: true, hardwareNoticePlate: .content)
+        checkFit("top edge adjustment at the same window size", geometry: topOnly, size: activity)
+
+        for completion in [false, true] {
+            host.present(size: activity, geometry: geometry, animated: false, clearHardwareWings: true,
+                         hardwareNoticePlate: .content)
+            sample("running", for: 0.02)
+            checkFit("activity", geometry: geometry, size: activity)
+            if completion {
+                host.present(size: notice, geometry: shifted, animated: true, transitionContent: .reveal,
+                             clearHardwareWings: true, hardwareNoticePlate: .content)
+                sample("completion reveal")
+                checkFit("completion", geometry: shifted, size: notice)
+            }
+            host.present(size: resting, geometry: geometry, animated: true, transitionContent: completion ? .depart : .none)
+            sample(completion ? "notice dismissal" : "activity finish")
+            if host.panel.frame.width > resting.width + 1 {
+                failures.append("hardware agent finish did not release the wider window")
+            }
+        }
+        host.present(size: activity, geometry: geometry, animated: false, clearHardwareWings: true,
+                     hardwareNoticePlate: .content)
+        host.present(size: resting, geometry: geometry, animated: true)
+        sample("before delayed completion", for: 0.05)
+        host.present(size: notice, geometry: shifted, animated: true, transitionContent: .reveal,
+                     clearHardwareWings: true, hardwareNoticePlate: .content)
+        sample("delayed completion during the shrink")
+        return failures
+    }
+
     static func runAndExit() -> Never {
         let arguments = CommandLine.arguments
         for mode in Mode.allCases {
@@ -572,6 +650,7 @@ enum NotchPresentationProbe {
         host.panel.ignoresMouseEvents = true
         host.panel.orderFrontRegardless()
         var failures = checkHiddenReveal(screen: screen) + checkRelocation(screen: screen)
+            + checkHardwareAgentTransitions(screen: screen)
         for height: CGFloat in [16, 24, 32, 64] {
             let path = NotchShape(attached: true, radius: NotchLayout.surfaceRadius(height: height))
                 .path(in: CGRect(x: 0, y: 0, width: 180, height: height)).cgPath

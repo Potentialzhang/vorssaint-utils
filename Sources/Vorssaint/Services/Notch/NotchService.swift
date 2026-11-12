@@ -995,23 +995,22 @@ final class NotchService: ObservableObject {
         return hoverEmphasized ? NotchHoverEmphasis.size(from: resting, geometry: geometry) : resting
     }
 
-    /// Hover and a closed notice leave the canvas clear around the pill, so
-    /// the camera stays covered by black alone. Hover then draws a thin frost.
-    /// A notice draws its own plate. A compact activity keeps the fill behind
-    /// its row: that row is the capsule.
+    /// Hover, notices and the agent strip supply their own appearance outside the camera.
     private var hardwareWingsAreClear: Bool {
         guard geometry.isHardwareCapsule, !fullscreenCompact, captureControls == nil,
               !expanded, !dragPlaceholder, !peeking, !noticeExpanded else { return false }
         if notice != nil { return true }
+        if compactActivity == .agents { return !showsCompactActivityPicker }
         return hoverEmphasized && compactActivity == nil
     }
 
-    /// A closed hardware notice paints a black plate of its own. Hover keeps
-    /// the thin frost and does not share this plate.
-    private var hardwareNoticePlate: Bool {
+    /// A closed notice and the agent strip share the adjusted plate contour.
+    private func hardwareNoticePlate(for size: CGSize) -> NotchHardwareNoticePlate? {
         guard geometry.isHardwareCapsule, !fullscreenCompact, captureControls == nil,
-              !expanded, !dragPlaceholder, !peeking, !noticeExpanded else { return false }
-        return notice != nil
+              !expanded, !dragPlaceholder, !peeking, !noticeExpanded else { return nil }
+        if let notice { return notice.event == .agents ? .content : .backdrop }
+        return compactActivity == .agents && !showsCompactActivityPicker
+            && size.width > geometry.restingSize(showsContent: false).width ? .content : nil
     }
 
     /// How far the island's centre sits right of the camera's. Only a closed
@@ -1048,8 +1047,7 @@ final class NotchService: ObservableObject {
         // does. The wings are drawn clear; the pill stays black.
         if let notice {
             if geometry.isHardwareCapsule, !noticeExpanded {
-                return geometry.hardwareNoticeSize(wings: notice.wings(in: geometry),
-                                                   edges: NotchNoticeEdgeFit.current())
+                return geometry.hardwareNoticeSize(wings: notice.wings(in: geometry))
             }
             return noticeExpanded ? nil : capsuleNoticeSize(notice)
         }
@@ -1057,9 +1055,13 @@ final class NotchService: ObservableObject {
         // At rest the charge or the allowance fits inside the bare capsule.
         // A hardware capsule's hover reach grows both ways from the bare pill.
         // An activity keeps the centred strip it already has.
-        let resting = compactActivity.map { capsuleStripSize(for: $0, companion: compactCompanion) }
+        let activity = compactActivity
+        let resting = activity.map { capsuleStripSize(for: $0, companion: compactCompanion) }
             ?? geometry.restingSize(showsContent: false)
-        let ear = geometry.isHardwareCapsule && compactActivity == nil
+        if geometry.isHardwareCapsule, activity == .agents, resting == geometry.restingSize(showsContent: false) {
+            return resting
+        }
+        let ear = geometry.isHardwareCapsule && activity == nil
         return hoverEmphasized ? NotchHoverEmphasis.size(from: resting, geometry: geometry, leading: ear) : resting
     }
 
@@ -2790,7 +2792,7 @@ final class NotchService: ObservableObject {
                             usesGlass: !fullscreenCompact && usesGlassSurface,
                             steady: fitsInPlace,
                             clearHardwareWings: hardwareWingsAreClear,
-                            hardwareNoticePlate: hardwareNoticePlate)
+                            hardwareNoticePlate: hardwareNoticePlate(for: size))
         // The selector lives in a separate full-screen panel. A floating
         // capsule may sit below the display edge, so publish the island's
         // actual bottom inset as the controls collapse or reopen.
@@ -3313,9 +3315,12 @@ final class NotchService: ObservableObject {
             guard mirror.model.update(geometry: base, strip: strip, size: size, activity: activity) || revealing else { continue }
             mirror.model.shown = true
             // Shown at once where the island just left, so the two trade places.
+            let showsAgentPlate = base.isHardwareCapsule && activity == .agents
+                && size.width > base.restingSize(showsContent: false).width
             mirror.host.present(size: size, geometry: base, animated: !revealing || afterApp,
                                 transitionContent: !revealing && previous != activity ? .replace : .none,
-                                revealFromHidden: afterApp)
+                                revealFromHidden: afterApp, clearHardwareWings: showsAgentPlate,
+                                hardwareNoticePlate: showsAgentPlate ? .content : nil)
             mirror.host.setActivationArea(CGRect(origin: .zero, size: size),
                                           title: FeatureStrings.notch(L10n.shared.language).open,
                                           willPress: {}, activate: { [weak self] in self?.bringIsland(to: id) })
@@ -3728,7 +3733,7 @@ final class NotchService: ObservableObject {
                              capsuleFit: NotchCapsuleFit.current(),
                              hideMenuBarGap: UserDefaults.standard.bool(forKey: DefaultsKey.notchHideMenuBarGap),
                              outline: UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled),
-                             barEdge: 1 / max(1, screen.backingScaleFactor))
+                             barEdge: 1 / max(1, screen.backingScaleFactor), noticeEdges: .current())
     }
 
     private func updateFullscreenVisibility(displayID: CGDirectDisplayID) {

@@ -458,20 +458,35 @@ struct NotchCapsuleAgentStrip: View {
 
     @ViewBuilder private func row(live: [AgentLiveSession]) -> some View {
         let working = working(live)
-        NotchCapsuleRow(size: size, geometry: displayGeometry ?? service.geometry) {
-            HStack(spacing: CapsuleLayout.spacing) {
-                NotchCapsuleAgentMarks(providers: working)
-                NotchAgentReadoutTimeline(readout: NotchAgentReadout(rawValue: readout) ?? .elapsed) { date in
-                    let text = reading(at: date, live: live)
-                    Text(text)
-                        .font(Font(CapsuleLayout.readingFont as CTFont))
-                        .foregroundStyle(working.first?.tint ?? .white)
-                        .lineLimit(1).fixedSize()
-                        // A reading that gains a digit, like an hour passing,
-                        // widens the capsule; the service measures the same.
-                        .onChange(of: NotchAgentSupport.readingShape(text)) { _, _ in
-                            DispatchQueue.main.async { service.refreshPresentation() }
-                        }
+        let geometry = displayGeometry ?? service.geometry
+        Group {
+            if geometry.isHardwareCapsule {
+                let wing = CapsuleLayout.hardwareAgentWingWidth(in: size, geometry: geometry)
+                if !working.isEmpty, wing >= CapsuleLayout.hardwareAgentMinimumWing(working: working.count) {
+                    HStack(spacing: 0) {
+                        NotchCapsuleAgentMarks(providers: working)
+                            .frame(width: wing, alignment: .trailing)
+                        Color.clear.frame(width: CapsuleLayout.hardwareAgentCameraGap(geometry))
+                            .accessibilityHidden(true)
+                        readoutView(live: live, tint: working.first?.tint ?? .white)
+                            .minimumScaleFactor(CapsuleLayout.hardwareAgentMinimumScale)
+                            .frame(width: wing, alignment: .leading)
+                    }
+                    .frame(height: geometry.stripHeight)
+                    .offset(y: NotchLayout.hardwareCapsuleContentDrop + geometry.noticeEdges.textDrop)
+                    .frame(width: size.width, height: size.height, alignment: .top)
+                    .background {
+                        let path = NotchLayout.hardwareNoticePath(in: CGRect(origin: .zero, size: size),
+                                                                  pillHeight: geometry.stripHeight, edges: geometry.noticeEdges)
+                        Path(path).fill(.black).allowsHitTesting(false)
+                    }
+                }
+            } else {
+                NotchCapsuleRow(size: size, geometry: geometry) {
+                    HStack(spacing: CapsuleLayout.spacing) {
+                        NotchCapsuleAgentMarks(providers: working)
+                        readoutView(live: live, tint: working.first?.tint ?? .white).fixedSize()
+                    }
                 }
             }
         }
@@ -479,6 +494,19 @@ struct NotchCapsuleAgentStrip: View {
         .accessibilityLabel(working.map(\.displayName).joined(separator: ", "))
         .accessibilityValue(reading(at: Date(), live: live))
         .accessibilityHint(FeatureStrings.notch(l10n.language).open)
+    }
+
+    private func readoutView(live: [AgentLiveSession], tint: Color) -> some View {
+        NotchAgentReadoutTimeline(readout: NotchAgentReadout(rawValue: readout) ?? .elapsed) { date in
+            let text = reading(at: date, live: live)
+            Text(text)
+                .font(Font(CapsuleLayout.readingFont as CTFont))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .onChange(of: NotchAgentSupport.readingShape(text)) { _, _ in
+                    DispatchQueue.main.async { service.refreshPresentation() }
+                }
+        }
     }
 
     private func reading(at now: Date, live: [AgentLiveSession]) -> String {

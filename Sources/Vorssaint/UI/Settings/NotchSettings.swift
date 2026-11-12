@@ -302,8 +302,7 @@ struct NotchSettings: View {
                     Text(text.cameraFitHint).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            // The idle pill stays on the measured capsule. Only a hardware
-            // notice's black plate follows these edges.
+            // These edges fit the black plates for notices and agent activity.
             if notch.geometry.isHardwareCapsule {
                 SettingsCard(title: text.noticeEdges) {
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {

@@ -11,9 +11,6 @@ struct NotchNoticeView: View {
     /// and out again, and the notice leaves its own out meanwhile.
     var hidesMascot = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @AppStorage(DefaultsKey.notchNoticeEdgeUp) private var noticeEdgeUp = 0.0
-    @AppStorage(DefaultsKey.notchNoticeEdgeDown) private var noticeEdgeDown = 0.0
-
     private var wings: NotchNoticeWings { notice.wings(in: geometry) }
     private var tint: Color {
         switch notice.event {
@@ -58,9 +55,20 @@ struct NotchNoticeView: View {
         // the frost's top.
         .offset(x: (wings.trailing - wings.leading) / 2,
                 y: geometry.isHardwareCapsule
-                    ? NotchLayout.hardwareCapsuleContentDrop
-                        + NotchNoticeEdgeFit(up: noticeEdgeUp, down: noticeEdgeDown).textDrop
+                    ? NotchLayout.hardwareCapsuleContentDrop + geometry.noticeEdges.textDrop
                     : 0)
+        .background(alignment: .top) {
+            // The agent notice's plate fades with the words in the foreground host.
+            if geometry.isHardwareCapsule, notice.event == .agents {
+                let size = geometry.hardwareNoticeSize(wings: wings)
+                let path = NotchLayout.hardwareNoticePath(in: CGRect(origin: .zero, size: size),
+                                                          pillHeight: geometry.stripHeight, edges: geometry.noticeEdges)
+                Path(path).fill(.black)
+                    .frame(width: size.width, height: size.height)
+                    .offset(x: geometry.noticeShift(wings))
+                    .allowsHitTesting(false)
+            }
+        }
         // A new reading that needs another width, as a level passing 99%,
         // moves its mark and meter with the island's steady ease, not ahead of it.
         // Keyed on the notice's own widths, so a display change does not ease it.

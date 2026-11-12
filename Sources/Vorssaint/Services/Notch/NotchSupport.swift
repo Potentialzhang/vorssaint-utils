@@ -161,9 +161,9 @@ struct NotchCameraFit: Equatable {
     }
 }
 
-/// How far a hardware notice's black plate leaves the pill. Positive `up`
-/// lifts the top edge, positive `down` lowers the bottom edge. The idle pill
-/// and the hover rim do not use it. Half points are whole pixels at 2x.
+/// How far a hardware notice or agent strip extends past the pill. Positive
+/// `up` lifts the top edge and positive `down` lowers the bottom edge.
+/// Half points are whole pixels at 2x.
 struct NotchNoticeEdgeFit: Equatable {
     /// The pill already sits 8.5 points below the screen edge, so that is as
     /// high as the top can go. The bottom stays inside the closed-notice
@@ -188,6 +188,10 @@ struct NotchNoticeEdgeFit: Equatable {
     /// Words follow the plate's centre, so a taller row does not leave them
     /// against the old top.
     var textDrop: CGFloat { (down - up) / 2 }
+}
+
+enum NotchHardwareNoticePlate {
+    case backdrop, content
 }
 
 /// A capsule sized and placed by hand. By itself it takes the height of the
@@ -469,8 +473,8 @@ enum NotchLayout {
 
     /// A closed hardware capsule that has grown past its pill keeps the canvas
     /// clear around the pill. Hover paints a thin frost there. A notice paints
-    /// its own plate. An open page is much taller than the hover lip and keeps
-    /// its own fill.
+    /// its own black plate. An open page is much taller than the hover lip
+    /// and keeps its own fill.
     static func hardwareWingsClear(surface: CGSize, resting: CGSize) -> Bool {
         let grown = surface.width > resting.width + 0.5 || surface.height > resting.height + 0.5
         return grown && surface.height <= resting.height + NotchHoverEmphasis.hardwareDrop + 1
@@ -484,6 +488,23 @@ enum NotchLayout {
         let bottom = min(max(0, hardwareCapsuleEdgeInset), max(0, height - top))
         return CGRect(x: rect.minX + side, y: rect.minY + top,
                       width: max(0, width - side * 2), height: max(0, height - top - bottom))
+    }
+
+    /// The system camera pill on the measured PROLED, in points. Camera fit
+    /// can lay the island's body out past this. Painted black must not.
+    static let hardwareSystemPill = CGSize(width: 58, height: 31)
+
+    /// Black actually painted on a closed hardware capsule. `body` is the
+    /// layout pill, which a camera-fit slider can push past the system pill.
+    /// One point inside on the sides and the bottom stays under that edge,
+    /// including the antialiased pixels. The top already meets the system pill.
+    /// A notice does not use this: its row is black on purpose, and wider.
+    static func hardwareBlackBody(around body: CGRect) -> CGRect {
+        let margin: CGFloat = 1
+        let width = min(max(0, body.width), hardwareSystemPill.width) - margin * 2
+        let height = min(max(0, body.height), hardwareSystemPill.height) - margin
+        guard width > 1, height > 1 else { return body }
+        return CGRect(x: body.midX - width / 2, y: body.minY, width: width, height: height)
     }
 
     /// How far the faint frost sticks out past the black pill, on each side.
@@ -511,6 +532,12 @@ enum NotchLayout {
         let maxY = max(minY, pillBody.maxY + edges.down)
         return CGRect(x: noticeBody.minX, y: minY,
                       width: max(0, noticeBody.width), height: maxY - minY)
+    }
+
+    static func hardwareNoticePath(in surface: CGRect, pillHeight: CGFloat, edges: NotchNoticeEdgeFit) -> CGPath {
+        let row = CGRect(x: surface.minX, y: surface.minY, width: surface.width, height: pillHeight)
+        let body = hardwareCapsuleBody(in: row)
+        return stadiumPath(for: hardwareNoticePlate(noticeBody: body, pillBody: body, edges: edges))
     }
 
     /// How much the window must grow so a plate that hangs below the pill is
@@ -1305,9 +1332,31 @@ enum NotchCapsuleLayout {
 
     /// Working agents' marks and the reading the person chose.
     static func agentSurface(reading: String, working: Int, geometry: NotchGeometry) -> CGSize {
-        let content = agentMarksWidth(working: working) + spacing
-            + width(NotchAgentSupport.readingShape(reading), font: readingFont)
-        return surface(content: content, maximum: Maximum.activity, geometry: geometry)
+        let marks = agentMarksWidth(working: working)
+        let text = width(NotchAgentSupport.readingShape(reading), font: readingFont)
+        guard geometry.isHardwareCapsule else {
+            return surface(content: marks + spacing + text, maximum: Maximum.activity, geometry: geometry)
+        }
+        let content = hardwareAgentCameraGap(geometry) + 2 * max(marks, text)
+        let size = surface(content: content, maximum: Maximum.activity, geometry: geometry)
+        guard hardwareAgentWingWidth(in: size, geometry: geometry) >= hardwareAgentMinimumWing(working: working) else {
+            return geometry.restingSize(showsContent: false)
+        }
+        return CGSize(width: size.width, height: geometry.hardwarePlateHeight)
+    }
+
+    static func hardwareAgentCameraGap(_ geometry: NotchGeometry) -> CGFloat {
+        max(geometry.cameraWidth, NotchLayout.hardwareSystemPill.width) + 2 * spacing
+    }
+
+    static func hardwareAgentWingWidth(in size: CGSize, geometry: NotchGeometry) -> CGFloat {
+        max(0, (size.width - hardwareAgentCameraGap(geometry)) / 2 - side(geometry) - endPadding)
+    }
+
+    static let hardwareAgentMinimumScale: CGFloat = 0.65
+
+    static func hardwareAgentMinimumWing(working: Int) -> CGFloat {
+        max(agentMarksWidth(working: working), width("0:00", font: readingFont) * hardwareAgentMinimumScale)
     }
 
     /// A download's arrow and name, then its meter and percentage, or a
@@ -2429,6 +2478,7 @@ struct NotchGeometry: Equatable {
     let outlineRoom: CGFloat
     private let capsuleWidthFit: CGFloat
     var compactSideRoom: CGFloat?
+    var noticeEdges: NotchNoticeEdgeFit
     var quickAccessBottomInset: CGFloat = 0
     var requiresFullWidthHeader = false
     /// What the open page puts in the island's top row.
@@ -2452,7 +2502,8 @@ struct NotchGeometry: Equatable {
          menuBarHeight: CGFloat = 24, compactSideRoom: CGFloat? = nil,
          customWidth: Double = NotchSize.defaultWidth, customHeight: Double = NotchSize.defaultHeight,
          cameraFit: NotchCameraFit = .zero, silhouette: NotchSilhouette = .notch, capsuleFit: NotchCapsuleFit = .zero,
-         hideMenuBarGap: Bool = false, outline: Bool = false, barEdge: CGFloat = 0) {
+         hideMenuBarGap: Bool = false, outline: Bool = false, barEdge: CGFloat = 0,
+         noticeEdges: NotchNoticeEdgeFit = .zero) {
         self.screen = screen
         self.layout = layout
         self.customWidth = NotchSize.clamped(customWidth, to: NotchSize.widthRange, fallback: NotchSize.defaultWidth)
@@ -2461,6 +2512,7 @@ struct NotchGeometry: Equatable {
         let housing = NotchHousing.classify(safeAreaTop: safeAreaTop, cameraWidth: cameraWidth)
         isNotched = housing == .notch
         isHardwareCapsule = housing == .capsule
+        self.noticeEdges = isHardwareCapsule ? noticeEdges : .zero
         // Only a physical camera has an outline to match; a simulated one follows the bar.
         let fit = housing == .none ? NotchCameraFit.zero : cameraFit
         // A capsule replaces only a simulated cutout. It is as wide as the
@@ -3026,12 +3078,13 @@ struct NotchGeometry: Equatable {
     var appPanelSize: CGSize { contentSize(for: expandedSize(module: .tools, panel: true)) }
     /// A hardware notice keeps the wing layout, and never a window narrower
     /// than the pill, or the cutout shows past the camera gap.
-    func hardwareNoticeSize(wings: NotchNoticeWings, edges: NotchNoticeEdgeFit = .zero) -> CGSize {
+    func hardwareNoticeSize(wings: NotchNoticeWings) -> CGSize {
         let spanned = noticeSize(wings: wings)
         let resting = restingSize(showsContent: false)
-        return CGSize(width: max(spanned.width, resting.width),
-                      height: resting.height + NotchLayout.hardwareNoticeExtraHeight(edges))
+        return CGSize(width: max(spanned.width, resting.width), height: hardwarePlateHeight)
     }
+
+    var hardwarePlateHeight: CGFloat { stripHeight + NotchLayout.hardwareNoticeExtraHeight(noticeEdges) }
 
     func frame(for size: CGSize) -> CGRect {
         CGRect(x: screen.midX + surfaceShift - size.width / 2,

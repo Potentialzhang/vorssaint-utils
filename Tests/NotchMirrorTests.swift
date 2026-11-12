@@ -48,7 +48,8 @@ enum NotchMirrorContract {
         var settling = false
         var settled: [() -> Void] = []
         func present(size: CGSize, geometry: NotchGeometry, animated: Bool, transitionContent: NotchContentTransition,
-                     revealFromHidden: Bool = false) {
+                     revealFromHidden: Bool = false, clearHardwareWings: Bool = false,
+                     hardwareNoticePlate: NotchHardwareNoticePlate? = nil) {
             presented.append((size, geometry, animated, transitionContent))
             reveals.append(revealFromHidden)
         }

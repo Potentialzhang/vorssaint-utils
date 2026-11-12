@@ -17,6 +17,7 @@ enum NotchCapsuleTests {
         preferenceContracts(suite)
         hardwareCapsuleContracts(suite)
         hardwareDodgeContracts(suite)
+        hardwareAgentStripContracts(suite)
         placementContracts(suite)
         outlineContracts(suite)
         stripContracts(suite)
@@ -132,11 +133,18 @@ enum NotchCapsuleTests {
         suite.expect(capsule.isHardwareCapsule && capsule.floats && !capsule.isNotched && capsule.floatingGap == 0
                      && capsule.floatingDrop == 0 && capsule.cameraHeight == 43,
                      "a short camera housing is a capsule the size of its safe area, not the menu bar")
+        let black = NotchLayout.hardwareBlackBody(around: body)
+        let systemPill = CGRect(x: body.midX - NotchLayout.hardwareSystemPill.width / 2, y: body.minY,
+                                width: NotchLayout.hardwareSystemPill.width, height: NotchLayout.hardwareSystemPill.height)
         suite.expect(body.minY == NotchLayout.hardwareCapsuleTopInset && body.contains(visible)
                      && capsule.frame(for: resting).maxY == screen.maxY
                      && capsule.headerCameraGap == 0 && capsule.headerTopInset >= capsule.cameraHeight
                      && capsule.safeContentTop >= capsule.cameraHeight,
                      "the drawn pill is the system capsule, off the screen edge, and an open page starts below the safe area")
+        suite.expect(systemPill.contains(black) && black.width <= systemPill.width - 2
+                     && black.height <= systemPill.height - 1 && abs(black.minY - body.minY) < 0.01
+                     && abs(black.midX - body.midX) < 0.01,
+                     "painted black stays inside the system pill when camera fit grows the layout body")
         let plain = NotchGeometry(screen: screen, safeAreaTop: 40, cameraWidth: 59, menuBarHeight: 45)
         let plainBody = NotchLayout.hardwareCapsuleBody(
             in: CGRect(origin: .zero, size: plain.restingSize(showsContent: false)))
@@ -223,12 +231,14 @@ enum NotchCapsuleTests {
                      && plate.width > frost.width,
                      "a notice plate matches the pill's top and bottom and is wider than the frost rim")
         let edges = NotchNoticeEdgeFit(up: 2, down: 3)
+        var fitted = roomy
+        fitted.noticeEdges = edges
         let moved = NotchLayout.hardwareNoticePlate(noticeBody: noticeBody, pillBody: body, edges: edges)
         suite.expect(abs(moved.minY - (body.minY - 2)) < 0.01
                      && abs(moved.maxY - (body.maxY + 3)) < 0.01
                      && abs(moved.minX - plate.minX) < 0.01
                      && abs(moved.width - plate.width) < 0.01
-                     && abs(roomy.hardwareNoticeSize(wings: wings, edges: edges).height
+                     && abs(fitted.hardwareNoticeSize(wings: wings).height
                             - (resting.height + NotchLayout.hardwareNoticeExtraHeight(edges))) < 0.01
                      && roomy.hardwareNoticeSize(wings: wings).height == resting.height
                      && NotchNoticeEdgeFit(up: 40, down: -40).up == 8.5
@@ -245,6 +255,43 @@ enum NotchCapsuleTests {
         let classic = NotchGeometry(screen: screen, safeAreaTop: 32, cameraWidth: 185, menuBarHeight: 39)
         suite.expect(!classic.isHardwareCapsule && classic.noticeShift(wings) == (wings.trailing - wings.leading) / 2,
                      "a hanging notch keeps its own wing shift")
+    }
+
+    private static func hardwareAgentStripContracts(_ suite: TestSuite) {
+        var geometry = NotchGeometry(screen: screen, safeAreaTop: 40, cameraWidth: 59, menuBarHeight: 45,
+                                     compactSideRoom: 300, cameraFit: NotchCameraFit(width: -20, height: 0))
+        let gap = Layout.hardwareAgentCameraGap(geometry)
+        suite.expect(gap >= NotchLayout.hardwareSystemPill.width + 2 * Layout.spacing,
+                     "agent wings leave room for the system camera even with a narrower camera fit")
+        for (reading, providers) in [("0:42", 1), ("1:02:05", 1), ("0:42", 4)] {
+            let size = Layout.agentSurface(reading: reading, working: providers, geometry: geometry)
+            let wing = Layout.hardwareAgentWingWidth(in: size, geometry: geometry)
+            let readingWidth = Layout.width(NotchAgentSupport.readingShape(reading), font: Layout.readingFont)
+            suite.expect(wing >= max(readingWidth, Layout.agentMarksWidth(working: providers))
+                         && size.height == geometry.stripHeight,
+                         "each agent wing fits its own content on the camera's side of the bar")
+        }
+        let unfitted = Layout.agentSurface(reading: "0:42", working: 1, geometry: geometry)
+        let wings = NotchNoticeWings(leading: 90, trailing: 60)
+        for edges in [NotchNoticeEdgeFit(up: 2, down: 0), NotchNoticeEdgeFit(up: 1.5, down: 8),
+                      NotchNoticeEdgeFit(up: -3, down: -2)] {
+            geometry.noticeEdges = edges
+            let activity = Layout.agentSurface(reading: "0:42", working: 1, geometry: geometry)
+            let notice = geometry.hardwareNoticeSize(wings: wings)
+            let activityBody = NotchLayout.hardwareNoticePath(in: CGRect(origin: .zero, size: activity),
+                                                              pillHeight: geometry.stripHeight, edges: edges).boundingBoxOfPath
+            let noticeBody = NotchLayout.hardwareNoticePath(in: CGRect(origin: .zero, size: notice),
+                                                            pillHeight: geometry.stripHeight, edges: edges).boundingBoxOfPath
+            suite.expect(activity.width == unfitted.width && activity.height == notice.height
+                         && activityBody.minY == noticeBody.minY && activityBody.maxY == noticeBody.maxY
+                         && activity.height >= activityBody.maxY,
+                         "both fitted edges align with notices and fit the running strip's window without changing its width")
+        }
+        geometry.compactSideRoom = 24
+        let cramped = Layout.agentSurface(reading: "0:42", working: 1, geometry: geometry)
+        suite.expect(cramped == geometry.restingSize(showsContent: false)
+                     && Layout.hardwareAgentWingWidth(in: cramped, geometry: geometry) == 0,
+                     "insufficient menu space keeps the camera pill without a wide empty agent strip")
     }
 
     /// The capsule is centred in the bar with the same margin above and

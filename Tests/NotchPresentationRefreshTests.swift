@@ -132,6 +132,8 @@ enum NotchPresentationRefreshContract {
         var usesGlass = false
         var revealFromHidden = false
         var steady = false
+        var clearHardwareWings = false
+        var hardwareNoticePlate: NotchHardwareNoticePlate?
         var outlineEnabled = false
         var outlineColor = NSColor.white
         var transitions: [NotchContentTransition] = []
@@ -143,9 +145,11 @@ enum NotchPresentationRefreshContract {
                      transitionContent: NotchContentTransition, quickAccess: NotchQuickAccessConfiguration?,
                      revealFromHidden: Bool, usesGlass: Bool, steady: Bool,
                      clearHardwareWings: Bool = false,
-                     hardwareNoticePlate: Bool = false) {
+                     hardwareNoticePlate: NotchHardwareNoticePlate? = nil) {
             transitions.append(transitionContent)
             self.steady = steady
+            self.clearHardwareWings = clearHardwareWings
+            self.hardwareNoticePlate = hardwareNoticePlate
             departsContent = transitionContent == .depart && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             self.usesGlass = usesGlass
             self.revealFromHidden = revealFromHidden
@@ -254,6 +258,9 @@ enum NotchPresentationRefreshContract {
         var surfaceSize: CGSize {
             if fullscreenCompact { return geometry.restingSize(showsContent: false) }
             if captureControls != nil { return captureControlsCollapsed ? geometry.collapsed : geometry.peek }
+            if !expanded, geometry.isHardwareCapsule, compactActivity == .agents {
+                return NotchCapsuleLayout.agentSurface(reading: "0:42", working: 1, geometry: geometry)
+            }
             if !expanded, compactActivityIsVisible { return compactActivityGeometry.compactActivitySize }
             if !expanded { return geometry.collapsed }
             return expandedGeometry.expandedSize(module: selected, capturePreviewHeight: captureContent == nil ? nil : captureContentHeight,
@@ -432,6 +439,32 @@ enum NotchPresentationRefreshContract {
             UserDefaults.standard.hides = false
             UserDefaults.standard.outline = false
         }
+        let agents = Service()
+        agents.expanded = false
+        agents.geometry = NotchGeometry(screen: agents.geometry.screen, safeAreaTop: 40, cameraWidth: 59,
+                                       compactSideRoom: 100, noticeEdges: NotchNoticeEdgeFit(up: 2, down: 3))
+        agents.compactActivity = .agents
+        agents.refreshPresentation()
+        suite.expect(agents.windowHost?.clearHardwareWings == true && agents.windowHost?.hardwareNoticePlate == .content
+                     && agents.windowHost?.targetSize.height == agents.geometry.hardwarePlateHeight,
+                     "the agent activity owns its visible wings and uses the fitted mask")
+        agents.geometry.compactSideRoom = 0
+        agents.refreshPresentation()
+        suite.expect(agents.windowHost?.hardwareNoticePlate == nil
+                     && agents.windowHost?.targetSize == agents.geometry.restingSize(showsContent: false),
+                     "the running strip falls back to the idle mask when the menu bar has no room")
+        agents.compactActivity = nil
+        agents.refreshPresentation()
+        suite.expect(agents.windowHost?.clearHardwareWings == false && agents.windowHost?.hardwareNoticePlate == nil,
+                     "finishing without a notice returns to the ordinary camera pill")
+        agents.notice = NotchNotice(event: .agents, title: "Codex finished", detail: "42s", symbol: "sparkles")
+        agents.refreshPresentation(transitionContent: .reveal)
+        suite.expect(agents.windowHost?.clearHardwareWings == true && agents.windowHost?.hardwareNoticePlate == .content,
+                     "the completion plate follows the foreground content through its reveal")
+        agents.notice = nil
+        agents.refreshPresentation(transitionContent: .depart)
+        suite.expect(agents.windowHost?.hardwareNoticePlate == nil, "dismissing completion drops its notice mask")
+
         for reduceMotion in [false, true] {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion = reduceMotion
             let service = Service()

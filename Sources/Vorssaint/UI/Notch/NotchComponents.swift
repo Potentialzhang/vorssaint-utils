@@ -486,11 +486,11 @@ final class NotchBackdropPresentation: ObservableObject {
     /// The black pill when a hardware capsule's wings are clear. Nil fills
     /// the whole contour, which is the resting pill and every open page.
     @Published var opaquePill: Path?
-    /// A thin, faint frost around `opaquePill`. Hover only. Nil with the pill,
-    /// and nil while a notice draws `noticePlate` instead.
+    /// A thin, faint frost around the layout pill. Hover only. Nil while a
+    /// notice is showing, and nil at rest.
     @Published var wingFrost: Path?
-    /// A closed notice's own black plate. Top and bottom match the pill.
-    /// Nil on hover, at rest, and on every open page.
+    /// A closed notice's own black plate. Wider than the system pill, so the
+    /// words have a ground. Nil on hover, at rest, and on every open page.
     @Published var noticePlate: Path?
     @Published var usesGlass = false
     /// The camera strip's height in points, which the translucent background
@@ -618,18 +618,16 @@ struct NotchSurfaceBackground: View {
         }
     }
 
-    /// The notice's own background. Opaque black, so it does not share the
-    /// hover rim and does not show the camera hole. The pill is drawn over
-    /// the same black, and the two meet without a seam.
+    /// The notice's own background. Opaque black, across the whole row, so
+    /// the words do not sit on the menu bar. The centre pill is the same black.
     @ViewBuilder private var hardwareNoticePlate: some View {
         if let plate = presentation.noticePlate {
             NotchBackdropShape(contour: plate).fill(Color.black)
         }
     }
 
-    /// Black under the shape. A hardware capsule's hover wings take the frost
-    /// above, and a notice takes the plate. Only the pill that covers the
-    /// camera is filled when neither is drawn.
+    /// Black under the shape. Hover wings take the frost above. A notice
+    /// takes the plate. Otherwise only the pill over the camera is filled.
     @ViewBuilder private var restingBlackFill: some View {
         let alpha = showsGlass || showsTranslucent ? presentation.restingBlack : 1.0
         if let pill = presentation.opaquePill {
