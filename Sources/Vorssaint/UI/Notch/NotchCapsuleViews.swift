@@ -473,11 +473,10 @@ struct NotchCapsuleAgentStrip: View {
                             .frame(width: wing, alignment: .leading)
                     }
                     .frame(height: geometry.stripHeight)
-                    .offset(y: NotchLayout.hardwareCapsuleContentDrop + geometry.noticeEdges.textDrop)
+                    .offset(y: geometry.hardwarePlate.contentDrop)
                     .frame(width: size.width, height: size.height, alignment: .top)
                     .background {
-                        let path = NotchLayout.hardwareNoticePath(in: CGRect(origin: .zero, size: size),
-                                                                  pillHeight: geometry.stripHeight, edges: geometry.noticeEdges)
+                        let path = geometry.hardwarePlate.path(in: CGRect(origin: .zero, size: size))
                         Path(path).fill(.black).allowsHitTesting(false)
                     }
                 }

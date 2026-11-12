@@ -446,7 +446,7 @@ enum NotchPresentationRefreshContract {
         agents.compactActivity = .agents
         agents.refreshPresentation()
         suite.expect(agents.windowHost?.clearHardwareWings == true && agents.windowHost?.hardwareNoticePlate == .content
-                     && agents.windowHost?.targetSize.height == agents.geometry.hardwarePlateHeight,
+                     && agents.windowHost?.targetSize.height == agents.geometry.hardwarePlate.windowHeight,
                      "the agent activity owns its visible wings and uses the fitted mask")
         agents.geometry.compactSideRoom = 0
         agents.refreshPresentation()

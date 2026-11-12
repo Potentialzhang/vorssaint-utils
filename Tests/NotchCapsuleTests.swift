@@ -213,16 +213,34 @@ enum NotchCapsuleTests {
                      && abs(shifted.frame(for: notice).midX - (screen.midX + roomy.noticeShift(wings))) < 0.01
                      && NotchLayout.hardwareWingsClear(surface: notice, resting: resting),
                      "a notice keeps a wing on each side of the pill, and those wings are clear")
+        let clearance = NotchLayout.expandedSystemCapsuleWidth(radius: 320) { (-37...61).contains($0) }
+        var occupied = roomy
+        occupied.systemCapsule.width = clearance ?? 0
+        suite.expect(occupied.noticeCameraGap >= 124 && occupied.noticeCameraGap < 134
+                     && occupied.hardwareNoticeSize(wings: wings).width == notice.width + occupied.noticeCameraGap - roomy.noticeCameraGap
+                     && occupied.noticeShift(wings) == roomy.noticeShift(wings)
+                     && occupied.restingSize(showsContent: false) == resting,
+                     "an asymmetric system capsule widens the notice's centre gap without moving it or enlarging the idle pill")
+        suite.expect(NotchLayout.expandedSystemCapsuleWidth(radius: 320) { abs($0) <= 29 } == 0
+                     && NotchLayout.expandedSystemCapsuleWidth(radius: 320) { _ in nil } == nil
+                     && NotchLayout.expandedSystemCapsuleWidth(radius: 320) { _ in true } == nil,
+                     "the normal pill needs no extra gap and failed or unbounded readings do not change the layout")
+        let restingEdges = NotchLayout.systemCapsuleVerticalOffsets { (8.5..<39.5).contains($0) }
+        let activityEdges = NotchLayout.systemCapsuleVerticalOffsets { (6..<44.5).contains($0) }
+        suite.expect(restingEdges?.top == 0 && restingEdges?.bottom == 0
+                     && activityEdges?.top == -2.5 && activityEdges?.bottom == 5
+                     && NotchLayout.systemCapsuleVerticalOffsets { $0 >= 6 } == nil,
+                     "compact system activity measures both edges and leaves open system popovers alone")
         let body = NotchLayout.hardwareCapsuleBody(in: CGRect(origin: .zero, size: resting))
         let frost = NotchLayout.hardwareFrostBody(around: body)
         suite.expect(abs(frost.maxY - body.maxY) < 0.01
                      && abs(body.minY - frost.minY - NotchLayout.hardwareFrostTopLift) < 0.01
                      && abs(frost.minX - (body.minX - NotchLayout.hardwareFrostLip)) < 0.01
                      && abs(frost.width - body.width - NotchLayout.hardwareFrostLip * 2) < 0.01
-                     && abs(NotchLayout.hardwareCapsuleContentDrop - 4) < 0.01,
+                     && abs(roomy.hardwarePlate.contentDrop - 4) < 0.01,
                      "the frost is a thin rim: a point above the pill, the same bottom, and words drop into the pill")
         let noticeBody = NotchLayout.hardwareCapsuleBody(in: CGRect(origin: .zero, size: notice))
-        let plate = NotchLayout.hardwareNoticePlate(noticeBody: noticeBody, pillBody: body)
+        let plate = roomy.hardwarePlate.path(in: CGRect(origin: .zero, size: notice)).boundingBoxOfPath
         suite.expect(abs(plate.minY - body.minY) < 0.01
                      && abs(plate.height - body.height) < 0.01
                      && abs(plate.maxY - body.maxY) < 0.01
@@ -233,13 +251,12 @@ enum NotchCapsuleTests {
         let edges = NotchNoticeEdgeFit(up: 2, down: 3)
         var fitted = roomy
         fitted.noticeEdges = edges
-        let moved = NotchLayout.hardwareNoticePlate(noticeBody: noticeBody, pillBody: body, edges: edges)
+        let moved = fitted.hardwarePlate.path(in: CGRect(origin: .zero, size: notice)).boundingBoxOfPath
         suite.expect(abs(moved.minY - (body.minY - 2)) < 0.01
                      && abs(moved.maxY - (body.maxY + 3)) < 0.01
                      && abs(moved.minX - plate.minX) < 0.01
                      && abs(moved.width - plate.width) < 0.01
-                     && abs(fitted.hardwareNoticeSize(wings: wings).height
-                            - (resting.height + NotchLayout.hardwareNoticeExtraHeight(edges))) < 0.01
+                     && abs(fitted.hardwareNoticeSize(wings: wings).height - max(resting.height, body.maxY + edges.down)) < 0.01
                      && roomy.hardwareNoticeSize(wings: wings).height == resting.height
                      && NotchNoticeEdgeFit(up: 40, down: -40).up == 8.5
                      && NotchNoticeEdgeFit(up: 40, down: -40).down == -8
@@ -278,15 +295,41 @@ enum NotchCapsuleTests {
             geometry.noticeEdges = edges
             let activity = Layout.agentSurface(reading: "0:42", working: 1, geometry: geometry)
             let notice = geometry.hardwareNoticeSize(wings: wings)
-            let activityBody = NotchLayout.hardwareNoticePath(in: CGRect(origin: .zero, size: activity),
-                                                              pillHeight: geometry.stripHeight, edges: edges).boundingBoxOfPath
-            let noticeBody = NotchLayout.hardwareNoticePath(in: CGRect(origin: .zero, size: notice),
-                                                            pillHeight: geometry.stripHeight, edges: edges).boundingBoxOfPath
+            let activityBody = geometry.hardwarePlate.path(in: CGRect(origin: .zero, size: activity)).boundingBoxOfPath
+            let noticeBody = geometry.hardwarePlate.path(in: CGRect(origin: .zero, size: notice)).boundingBoxOfPath
             suite.expect(activity.width == unfitted.width && activity.height == notice.height
                          && activityBody.minY == noticeBody.minY && activityBody.maxY == noticeBody.maxY
                          && activity.height >= activityBody.maxY,
                          "both fitted edges align with notices and fit the running strip's window without changing its width")
         }
+        let normal = Layout.agentSurface(reading: "1:02:05", working: 1, geometry: geometry)
+        let normalWing = Layout.hardwareAgentWingWidth(in: normal, geometry: geometry)
+        let normalPlate = geometry.hardwarePlate
+        geometry.systemCapsule.width = 132
+        let expandedGap = Layout.hardwareAgentCameraGap(geometry)
+        let wider = Layout.agentSurface(reading: "1:02:05", working: 1, geometry: geometry)
+        suite.expect(expandedGap == 132 + 2 * Layout.spacing && wider.width == normal.width + expandedGap - gap
+                     && wider.height == normal.height
+                     && Layout.hardwareAgentWingWidth(in: wider, geometry: geometry) == normalWing,
+                     "expanding the system capsule widens the agent strip while preserving both content wings")
+        geometry.systemCapsule.topOffset = -2.5
+        geometry.systemCapsule.bottomOffset = 5
+        let taller = Layout.agentSurface(reading: "1:02:05", working: 1, geometry: geometry)
+        let tallerNotice = geometry.hardwareNoticeSize(wings: wings)
+        let normalBody = normalPlate.path(in: CGRect(origin: .zero, size: wider)).boundingBoxOfPath
+        let agentBody = geometry.hardwarePlate.path(in: CGRect(origin: .zero, size: taller)).boundingBoxOfPath
+        let noticeBody = geometry.hardwarePlate.path(in: CGRect(origin: .zero, size: tallerNotice)).boundingBoxOfPath
+        suite.expect(taller.width == wider.width && taller.height == tallerNotice.height && taller.height > wider.height
+                     && agentBody.minY == normalBody.minY - 2.5 && agentBody.maxY == normalBody.maxY + 5
+                     && agentBody.minY == noticeBody.minY && agentBody.maxY == noticeBody.maxY
+                     && geometry.hardwarePlate.contentDrop + geometry.stripHeight / 2 == agentBody.midY,
+                     "agent activity and notices follow the same vertical system offsets on top of the saved fit")
+        geometry.compactSideRoom = 70
+        let crampedBySystem = Layout.agentSurface(reading: "0:42", working: 1, geometry: geometry)
+        geometry.systemCapsule = .resting
+        let restored = Layout.agentSurface(reading: "0:42", working: 1, geometry: geometry)
+        suite.expect(crampedBySystem == geometry.restingSize(showsContent: false) && restored.width > crampedBySystem.width,
+                     "an agent strip returns when a collapsed system capsule gives both wings room again")
         geometry.compactSideRoom = 24
         let cramped = Layout.agentSurface(reading: "0:42", working: 1, geometry: geometry)
         suite.expect(cramped == geometry.restingSize(showsContent: false)

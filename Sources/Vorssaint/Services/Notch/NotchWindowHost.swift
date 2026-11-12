@@ -99,7 +99,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         }
         canvas.setFloatingGap(geometry.floatingGap, hardwareCapsule: geometry.isHardwareCapsule)
         canvas.setHardwarePill(geometry.isHardwareCapsule ? geometry.restingSize(showsContent: false) : nil)
-        canvas.setNoticeEdgeFit(geometry.noticeEdges)
+        canvas.setHardwarePlateGeometry(geometry.isHardwareCapsule ? geometry.hardwarePlate : nil)
         canvas.layoutSubtreeIfNeeded()
         appliedFrame = panel.frame
         overlaySpace?.add(panel)
@@ -271,8 +271,9 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         // at a size it already has.
         canvas.setFloatingGap(geometry.floatingGap, hardwareCapsule: geometry.isHardwareCapsule)
         canvas.setHardwarePill(geometry.isHardwareCapsule ? geometry.restingSize(showsContent: false) : nil)
-        let adjustsHardwarePlate = hardwareNoticePlate != nil && geometry.noticeEdges != currentGeometry.noticeEdges
-        canvas.setNoticeEdgeFit(geometry.noticeEdges)
+        let plateGeometry = geometry.isHardwareCapsule ? geometry.hardwarePlate : nil
+        let adjustsHardwarePlate = hardwareNoticePlate != nil && plateGeometry != canvas.hardwarePlateGeometry
+        canvas.setHardwarePlateGeometry(plateGeometry)
         // Turning the wings clear can happen at once. Turning them solid
         // across a shrink waits until that shrink is on screen, below.
         requestedClearHardwareWings = clearHardwareWings
@@ -1226,8 +1227,7 @@ private final class NotchCanvas: NSView {
     private var closingClearWings = false
     /// A closed notice draws its own plate instead of the hover frost.
     private var hardwareNoticePlate: NotchHardwareNoticePlate?
-    /// The notice plate's own top and bottom. Zero keeps them on the pill.
-    private var noticeEdgeFit = NotchNoticeEdgeFit.zero
+    private(set) var hardwarePlateGeometry: NotchHardwarePlateGeometry?
     /// The size the silhouette's model path was drawn for.
     private var silhouetteSize = CGSize.zero
     private var outlineEnabled = false
@@ -1356,17 +1356,17 @@ private final class NotchCanvas: NSView {
     /// re-enters presentation while the old notice size is still current.
     func setHardwareNoticePlate(_ plate: NotchHardwareNoticePlate?) {
         guard hardwareNoticePlate != plate else { return }
+        if hardwareNoticePlate != nil && plate == nil { closingClearWings = true }
         hardwareNoticePlate = plate
         needsLayout = true
         updateCanvasBlack()
         publishOpaquePill()
     }
 
-    /// A slider can move the plate without resizing the window, so the mask
-    /// has to be drawn again even when the frame did not change.
-    func setNoticeEdgeFit(_ fit: NotchNoticeEdgeFit) {
-        guard noticeEdgeFit != fit else { return }
-        noticeEdgeFit = fit
+    /// The system pill or a slider can move the mask within the same frame.
+    func setHardwarePlateGeometry(_ geometry: NotchHardwarePlateGeometry?) {
+        guard hardwarePlateGeometry != geometry else { return }
+        hardwarePlateGeometry = geometry
         needsLayout = true
     }
 
@@ -1374,7 +1374,7 @@ private final class NotchCanvas: NSView {
     /// through the shrink. Anything taller, such as an open page, fills at once.
     func prepareHardwareWings(clear: Bool, animatingTo size: CGSize) {
         if clear {
-            setClearsHardwareWings(true)
+            if !closingClearWings { setClearsHardwareWings(true) }
             return
         }
         if let pill = hardwarePill, wingsClear,
@@ -1396,7 +1396,7 @@ private final class NotchCanvas: NSView {
     /// not stay black, or that black shows through the mask around the pill.
     private var wingsClear: Bool {
         guard hardwareCapsule, let pill = hardwarePill else { return false }
-        if closingClearWings || hardwareNoticePlate == .content { return true }
+        if closingClearWings || hardwareNoticePlate != nil { return true }
         guard targetClearsWings else { return false }
         return NotchLayout.hardwareWingsClear(surface: contentSize, resting: pill)
     }
@@ -1642,9 +1642,8 @@ private final class NotchCanvas: NSView {
     /// The fitted black plate in the size's own coordinates. The plate uses
     /// the pill's shoulders, so changing its height leaves its width alone.
     private func hardwareNoticeMask(for size: CGSize) -> CGPath? {
-        guard let pill = hardwarePill, pill.width > 0, pill.height > 0, size.width > 0 else { return nil }
-        return NotchLayout.hardwareNoticePath(in: CGRect(origin: .zero, size: size),
-                                              pillHeight: pill.height, edges: noticeEdgeFit)
+        guard size.width > 0 else { return nil }
+        return hardwarePlateGeometry?.path(in: CGRect(origin: .zero, size: size))
     }
 
     /// The resize the silhouette is running, to draw the material for the
@@ -1763,9 +1762,9 @@ private final class NotchCanvas: NSView {
             let black = NotchLayout.stadiumPath(for: NotchLayout.hardwareBlackBody(around: body))
             let pillPath = backdropContour(black)
             if hardwareNoticePlate == .content { return (pillPath, nil, nil) }
-            if hardwareNoticePlate == .backdrop {
+            if hardwareNoticePlate == .backdrop, let hardwarePlateGeometry {
                 let surface = CGRect(x: islandX(contentSize), y: 0, width: contentSize.width, height: pill.height)
-                let plate = NotchLayout.hardwareNoticePath(in: surface, pillHeight: pill.height, edges: noticeEdgeFit)
+                let plate = hardwarePlateGeometry.path(in: surface)
                 return (pillPath, nil, backdropContour(plate))
             }
             let frost = NotchLayout.stadiumPath(for: NotchLayout.hardwareFrostBody(around: body))

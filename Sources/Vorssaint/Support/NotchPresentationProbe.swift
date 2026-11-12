@@ -559,9 +559,7 @@ enum NotchPresentationProbe {
         var failures: [String] = []
 
         func checkFit(_ phase: String, geometry: NotchGeometry, size: CGSize) {
-            let expected = NotchLayout.hardwareNoticePath(in: CGRect(origin: .zero, size: size),
-                                                          pillHeight: geometry.stripHeight,
-                                                          edges: geometry.noticeEdges).boundingBoxOfPath
+            let expected = geometry.hardwarePlate.path(in: CGRect(origin: .zero, size: size)).boundingBoxOfPath
             guard let shown = host.silhouetteProbePath?.boundingBoxOfPath,
                   abs(shown.minY - expected.minY) <= 0.5, abs(shown.maxY - expected.maxY) <= 0.5,
                   abs(shown.width - expected.width) <= 0.5, host.panel.frame.height >= shown.maxY - 0.5 else {
@@ -587,6 +585,23 @@ enum NotchPresentationProbe {
         host.present(size: activity, geometry: geometry, animated: false, clearHardwareWings: true, hardwareNoticePlate: .content)
         host.present(size: activity, geometry: topOnly, animated: true, clearHardwareWings: true, hardwareNoticePlate: .content)
         checkFit("top edge adjustment at the same window size", geometry: topOnly, size: activity)
+
+        var tall = shifted
+        tall.systemCapsule = NotchSystemCapsule(width: 132, topOffset: -2.5, bottomOffset: 7)
+        let tallNotice = tall.hardwareNoticeSize(wings: wings)
+        var tallActivityGeometry = tall
+        tallActivityGeometry.surfaceShift = 0
+        let tallActivity = NotchCapsuleLayout.agentSurface(reading: "1:00:00", working: 1, geometry: tallActivityGeometry)
+        host.present(size: tallActivity, geometry: tallActivityGeometry, animated: true,
+                     clearHardwareWings: true, hardwareNoticePlate: .content)
+        checkFit("taller activity", geometry: tallActivityGeometry, size: tallActivity)
+        host.present(size: activity, geometry: geometry, animated: true, clearHardwareWings: true, hardwareNoticePlate: .content)
+        checkFit("activity after the system capsule shrinks", geometry: geometry, size: activity)
+        host.present(size: tallNotice, geometry: tall, animated: true, clearHardwareWings: true, hardwareNoticePlate: .backdrop)
+        checkFit("taller notification", geometry: tall, size: tallNotice)
+        host.present(size: resting, geometry: tallActivityGeometry, animated: true, transitionContent: .depart)
+        sample("taller notification dismissal")
+        host.finishDeparture()
 
         for completion in [false, true] {
             host.present(size: activity, geometry: geometry, animated: false, clearHardwareWings: true,

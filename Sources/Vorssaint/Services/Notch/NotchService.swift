@@ -288,6 +288,9 @@ final class NotchService: ObservableObject {
     private var ownInputSourceID: String?
     private var notchNeedsMonitor = false
     private var menuSpaceTimer: Timer?
+    private var systemCapsuleTimer: Timer?
+    private var systemCapsuleReading = false
+    private var systemCapsules: [CGDirectDisplayID: NotchSystemCapsule] = [:]
     private var appFullscreenTimer: Timer?
     private var appFullscreenDisplays: Set<CGDirectDisplayID> = []
     /// Whether a full-screen Space, not an app's own full screen, hides the island.
@@ -1366,6 +1369,10 @@ final class NotchService: ObservableObject {
         sectionScroll = NotchSectionScroll()
         stopMenuSpaceMonitoring()
         geometry.compactSideRoom = nil
+        systemCapsuleTimer?.invalidate()
+        systemCapsuleTimer = nil
+        systemCapsules.removeAll()
+        geometry.systemCapsule = .resting
         hoverWork?.cancel(); hoverWork = nil
         noticeWork?.cancel(); noticeWork = nil
         endDeparture()
@@ -3258,6 +3265,7 @@ final class NotchService: ObservableObject {
     /// it shows closed. The copies are drawn for their own displays, a
     /// capsule or a notch, and they take no part in hovering or notices.
     private func syncMirrors() {
+        defer { syncSystemCapsuleMonitoring() }
         guard showsOnAllDisplays, running, !suspended, windowHost != nil else { closeMirrors(); return }
         let screens = NSScreen.screens
         for (id, mirror) in mirrors where !screens.contains(where: { $0.notchDisplayID == id }) {
@@ -3312,12 +3320,15 @@ final class NotchService: ObservableObject {
             // Where an app's full screen eased the copy away, it eases back in.
             let afterApp = revealing && mirrorsHiddenByApp.remove(id) != nil
             let previous = mirror.model.activity
+            let adjustsAgentPlate = base.isHardwareCapsule && activity == .agents
+                && (mirror.model.geometry.noticeCameraGap != base.noticeCameraGap
+                    || mirror.model.geometry.hardwarePlate != base.hardwarePlate)
             guard mirror.model.update(geometry: base, strip: strip, size: size, activity: activity) || revealing else { continue }
             mirror.model.shown = true
             // Shown at once where the island just left, so the two trade places.
             let showsAgentPlate = base.isHardwareCapsule && activity == .agents
                 && size.width > base.restingSize(showsContent: false).width
-            mirror.host.present(size: size, geometry: base, animated: !revealing || afterApp,
+            mirror.host.present(size: size, geometry: base, animated: (!revealing || afterApp) && !adjustsAgentPlate,
                                 transitionContent: !revealing && previous != activity ? .replace : .none,
                                 revealFromHidden: afterApp, clearHardwareWings: showsAgentPlate,
                                 hardwareNoticePlate: showsAgentPlate ? .content : nil)
@@ -3508,6 +3519,61 @@ final class NotchService: ObservableObject {
         menuSpaceGeneration += 1
     }
 
+    private var systemCapsuleTarget: (display: CGDirectDisplayID, geometry: NotchGeometry)? {
+        guard running, !suspended, AXIsProcessTrusted() else { return nil }
+        if let displayID, geometry.isHardwareCapsule, panel?.isVisible == true {
+            let showsNotice = notice != nil && noticeCanPresent && !noticeExpanded && !peeking && !fullscreenCompact
+            if showsNotice || (compactActivityIsVisible && compactActivity == .agents) {
+                return (displayID, geometry)
+            }
+        }
+        guard let (display, mirror) = mirrors.first(where: {
+            $0.value.model.geometry.isHardwareCapsule && $0.value.model.activity == .agents
+                && $0.value.model.shown && $0.value.host.panel.isVisible
+        }) else { return nil }
+        return (display, mirror.model.geometry)
+    }
+
+    private func syncSystemCapsuleMonitoring() {
+        guard systemCapsuleTarget != nil else {
+            systemCapsuleTimer?.invalidate()
+            systemCapsuleTimer = nil
+            return
+        }
+        guard systemCapsuleTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.3, repeats: true) { [weak self] _ in self?.readSystemCapsule() }
+        timer.tolerance = 0.05
+        systemCapsuleTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        readSystemCapsule()
+    }
+
+    private func readSystemCapsule() {
+        guard !systemCapsuleReading, let (display, geometry) = systemCapsuleTarget else { return }
+        systemCapsuleReading = true
+        let primaryTop = NSScreen.screens.first?.frame.maxY ?? geometry.screen.maxY
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let capsule = NotchMenuBarSpace.systemCapsule(geometry: geometry, primaryTop: primaryTop)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.systemCapsuleReading = false
+                guard let target = self.systemCapsuleTarget, target.display == display, target.geometry.screen == geometry.screen,
+                      let capsule, capsule != target.geometry.systemCapsule else { return }
+                self.systemCapsules[display] = capsule == .resting ? nil : capsule
+                if self.displayID == display && self.geometry.screen == geometry.screen {
+                    let previousGap = self.geometry.noticeCameraGap
+                    let previousPlate = self.geometry.hardwarePlate
+                    self.geometry.systemCapsule = capsule
+                    if self.geometry.noticeCameraGap != previousGap || self.geometry.hardwarePlate != previousPlate {
+                        self.refreshPresentation(animated: false)
+                    }
+                } else {
+                    self.syncMirrors()
+                }
+            }
+        }
+    }
+
     /// Displays that share Spaces show the menu bar on the main one only.
     private var displayHasMenuBar: Bool {
         NSScreen.screensHaveSeparateSpaces || NSScreen.withMenuBar?.frame == geometry.screen
@@ -3671,7 +3737,9 @@ final class NotchService: ObservableObject {
 
     private func updateScreen() {
         let screens = NSScreen.screens
-        menuBarMeasurements.retainDisplays(screens.map(\.notchDisplayID))
+        let displays = screens.map(\.notchDisplayID)
+        menuBarMeasurements.retainDisplays(displays)
+        systemCapsules = systemCapsules.filter { displays.contains($0.key) }
         guard let index = screenIndex(in: screens) else { withdrawFromMissingScreen(); return }
         let screen = screens[index]
         displayID = screen.notchDisplayID
@@ -3720,7 +3788,7 @@ final class NotchService: ObservableObject {
         if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
             cameraWidth = max(0, right.minX - left.maxX)
         } else { cameraWidth = 0 }
-        return NotchGeometry(screen: screen.frame, safeAreaTop: screen.safeAreaInsets.top,
+        var geometry = NotchGeometry(screen: screen.frame, safeAreaTop: screen.safeAreaInsets.top,
                              cameraWidth: cameraWidth,
                              layout: NotchSize(rawValue: UserDefaults.standard.string(forKey: DefaultsKey.notchSize) ?? "") ?? .spacious,
                              menuBarHeight: menuBarMeasurements.height(
@@ -3734,6 +3802,10 @@ final class NotchService: ObservableObject {
                              hideMenuBarGap: UserDefaults.standard.bool(forKey: DefaultsKey.notchHideMenuBarGap),
                              outline: UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled),
                              barEdge: 1 / max(1, screen.backingScaleFactor), noticeEdges: .current())
+        if geometry.isHardwareCapsule {
+            geometry.systemCapsule = systemCapsules[screen.notchDisplayID] ?? .resting
+        }
+        return geometry
     }
 
     private func updateFullscreenVisibility(displayID: CGDirectDisplayID) {

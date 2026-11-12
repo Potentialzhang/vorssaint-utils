@@ -7,6 +7,46 @@ import ApplicationServices
 /// Geometry only: never reads menu titles, opens menus or requests permission.
 /// Run off-main. Missing geometry fails closed rather than covering a menu.
 enum NotchMenuBarSpace {
+    /// MenuBarAgent exposes its centre window at the occupied points even
+    /// though the accessibility window's frame spans the entire display.
+    static func systemCapsule(geometry: NotchGeometry, primaryTop: CGFloat) -> NotchSystemCapsule? {
+        guard AXIsProcessTrusted(), let agent = NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.apple.MenuBarAgent").first else { return nil }
+        let app = AXUIElementCreateApplication(agent.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.025)
+        let x = geometry.screen.midX
+        let screenTop = primaryTop - geometry.screen.maxY
+        let centreY = NotchLayout.hardwareCapsuleTopInset + NotchLayout.hardwareSystemPill.height / 2
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.12
+        var capsuleWindow: AXUIElement?
+        func contains(_ offset: CGFloat, _ y: CGFloat) -> Bool? {
+            guard ProcessInfo.processInfo.systemUptime < deadline else { return nil }
+            var hit: AXUIElement?
+            switch AXUIElementCopyElementAtPosition(app, Float(x + offset), Float(screenTop + y), &hit) {
+            case .noValue, .notImplemented: return false
+            case .success: break
+            default: return nil
+            }
+            for _ in 0..<4 {
+                guard let element = hit else { return false }
+                if let capsuleWindow, CFEqual(element, capsuleWindow) { return true }
+                if value(element, kAXIdentifierAttribute) as? String == "ax-center-hud-window" {
+                    capsuleWindow = element
+                    return true
+                }
+                guard let parent = value(element, kAXParentAttribute), CFGetTypeID(parent) == AXUIElementGetTypeID()
+                else { return false }
+                hit = unsafeBitCast(parent, to: AXUIElement.self)
+            }
+            return false
+        }
+        guard contains(0, centreY) == true,
+              let width = NotchLayout.expandedSystemCapsuleWidth(radius: min(320, geometry.screen.width / 2 - 12),
+                                                                contains: { contains($0, centreY) }),
+              let vertical = NotchLayout.systemCapsuleVerticalOffsets(contains: { contains(0, $0) }) else { return nil }
+        return NotchSystemCapsule(width: width, topOffset: vertical.top, bottomOffset: vertical.bottom)
+    }
+
     static func measure(pid: pid_t, geometry: NotchGeometry, primaryTop: CGFloat,
                         ownWindow: Int) -> CGFloat? {
         guard AXIsProcessTrusted() else { return nil }

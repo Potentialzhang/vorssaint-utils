@@ -103,6 +103,7 @@ enum NotchMirrorContract {
         var opened = 0, collapses = 0, countdownOpenings = 0
         var moves: [CGDirectDisplayID] = []
         var made: [Host] = []
+        func syncSystemCapsuleMonitoring() {}
 
         /// A built-in display with a camera housing, or an external one with a capsule.
         func baseGeometry(for screen: NSScreen) -> NotchGeometry {

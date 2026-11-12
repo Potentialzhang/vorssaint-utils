@@ -54,15 +54,13 @@ struct NotchNoticeView: View {
         // which sits above the pill; drop it onto the pill so it clears
         // the frost's top.
         .offset(x: (wings.trailing - wings.leading) / 2,
-                y: geometry.isHardwareCapsule
-                    ? NotchLayout.hardwareCapsuleContentDrop + geometry.noticeEdges.textDrop
-                    : 0)
+                y: geometry.isHardwareCapsule ? geometry.hardwarePlate.contentDrop : 0)
+        .frame(height: geometry.isHardwareCapsule ? geometry.hardwarePlate.windowHeight : nil, alignment: .top)
         .background(alignment: .top) {
             // The agent notice's plate fades with the words in the foreground host.
             if geometry.isHardwareCapsule, notice.event == .agents {
                 let size = geometry.hardwareNoticeSize(wings: wings)
-                let path = NotchLayout.hardwareNoticePath(in: CGRect(origin: .zero, size: size),
-                                                          pillHeight: geometry.stripHeight, edges: geometry.noticeEdges)
+                let path = geometry.hardwarePlate.path(in: CGRect(origin: .zero, size: size))
                 Path(path).fill(.black)
                     .frame(width: size.width, height: size.height)
                     .offset(x: geometry.noticeShift(wings))
