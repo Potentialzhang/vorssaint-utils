@@ -133,6 +133,20 @@ enum NotchCapsuleTests {
         suite.expect(capsule.isHardwareCapsule && capsule.floats && !capsule.isNotched && capsule.floatingGap == 0
                      && capsule.floatingDrop == 0 && capsule.cameraHeight == 43,
                      "a short camera housing is a capsule the size of its safe area, not the menu bar")
+        let physical = CGRect(x: screen.midX - 59 / 2, y: screen.maxY - 40, width: 59, height: 40)
+        suite.expect(capsule.physicalCamera == physical && capsule.cameraWidth > physical.width,
+                     "menu-bar avoidance uses the hardware capsule's raw housing independently of its fitted drawing")
+        let menus = [CGRect(x: screen.minX, y: screen.maxY - 45, width: 100, height: 45)]
+        let hiddenStatus = CGRect(x: screen.midX - 4, y: screen.maxY - 28, width: 8, height: 12)
+        let expectedRoom = NotchMenuBarLayout.measuredSideRoom(screen: screen, cameraWidth: capsule.cameraWidth,
+                                                              barHeight: 45, menuItems: menus, statusItems: [])
+        suite.expect(NotchMenuBarLayout.measuredSideRoom(screen: screen, cameraWidth: capsule.cameraWidth,
+                                                        barHeight: 45, menuItems: menus, statusItems: [hiddenStatus],
+                                                        physicalCamera: capsule.physicalCamera) == expectedRoom,
+                     "a status item hidden under the hardware capsule does not withdraw the customized island")
+        let offCentre = NotchGeometry(screen: screen, safeAreaTop: 40, cameraWidth: 59, physicalCameraX: 820)
+        suite.expect(offCentre.isHardwareCapsule && offCentre.physicalCamera?.minX == 820,
+                     "a hardware capsule preserves the physical camera position reported by the screen")
         let black = NotchLayout.hardwareBlackBody(around: body)
         let systemPill = CGRect(x: body.midX - NotchLayout.hardwareSystemPill.width / 2, y: body.minY,
                                 width: NotchLayout.hardwareSystemPill.width, height: NotchLayout.hardwareSystemPill.height)
